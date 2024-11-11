@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"attached_datasets": [
+		{
+			"id": "24e5da9c-17bc-4df2-becd-0782724efaa5",
+			"mount": "response_matrix_multiplane-ophys_721291_2024-05-16_08-57-00_filtered_events"
+		},
+		{
+			"id": "8f018196-5cb1-4ec8-885b-472b7970a727",
+			"mount": "design_matrix_v00_multiplane-ophys_721291_2024-05-16_08-57-00"
+		}
+	]
+}
