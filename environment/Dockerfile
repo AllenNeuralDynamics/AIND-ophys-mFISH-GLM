@@ -30,7 +30,8 @@ RUN pip install -U --no-cache-dir \
     aind-data-access-api \
     aind-ophys-utils \
     pymongo \
-    scikit-learn
+    scikit-learn \
+    bottleneck
 
 RUN git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \
     && cd aind-codeocean-api \
