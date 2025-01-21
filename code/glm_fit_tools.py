@@ -2,18 +2,19 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import json
+from glob import glob
 from dask import delayed, compute
 from dask.distributed import Client
 
 
 ##############################################################################################################
 ## Loading and trimming data
-def load_data(session_name, data_type, dm_version, data_path='/root/capsule/data'):
-    if type(data_path) == str:
-        data_path = Path(data_path)
+def load_data(session_name, data_type, dm_version, load_path='/root/capsule/data'):
+    if type(load_path) == str:
+        load_path = Path(load_path)
     
-    dm_path = data_path / f'design_matrix_v{dm_version:02}_{session_name}'
-    rm_path = data_path / f'response_matrix_{session_name}_{data_type}'
+    dm_path = load_path / f'design_matrix_{session_name}_v{dm_version:02}'
+    rm_path = load_path / f'response_matrix_{session_name}_{data_type}'
 
     x_fn = dm_path / 'design_matrix.nc'
 
@@ -438,7 +439,8 @@ def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
 
 ##########################
 ## Running the whole session data
-def collect_session_results(run_params, fit_params, X_trim, response_trim, stratified_frames, cv_inds_stratified):
+def collect_session_results(run_params, fit_params, X_trim, response_trim, stratified_frames, cv_inds_stratified,
+                            parallel=True, num_cores=None):
     ''' Collect session results, from collect_fold_results, using nested cross-validation for lambda selection and model fitting.
     
     Parameters
@@ -479,7 +481,8 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         y_test_outer = response_trim[test_frames, :]
         
         lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold = \
-            collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer, nested_fold_inds)
+            collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer, nested_fold_inds,
+                                 parallel=parallel, num_cores=num_cores)
         
         lambdas_fold = lambdas_fold.expand_dims(test_fold_ind=[test_fold_ind])
         W_fold = W_fold.expand_dims(test_fold_ind=[test_fold_ind])
@@ -499,12 +502,16 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
             var_ratio_train_cv = xr.concat([var_ratio_train_cv, var_ratio_train_fold], dim='test_fold_ind')
             var_ratio_test_cv = xr.concat([var_ratio_test_cv, var_ratio_test_fold], dim='test_fold_ind')
             vr_test_train_ratio_cv = xr.concat([vr_test_train_ratio_cv, vr_test_train_ratio_fold], dim='test_fold_ind')
+    
+    # Validation
+    check_nan_weights(W_cv, run_params)
+    
     return lambdas_cv, W_cv, var_ratio_train_cv, var_ratio_test_cv, vr_test_train_ratio_cv
     
     
 
 def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
-                         nested_fold_inds, use_dask=True, num_cores=None):
+                         nested_fold_inds, parallel=True, num_cores=None):
     ''' Collect fold results.
     
     Parameters
@@ -523,7 +530,7 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
         Response matrix for testing
     nested_fold_inds : list
         List of indices for nested cross-validation
-    use_dask : bool (optional)
+    parallel : bool (optional)
         Use dask for parallel processing, default is True
     num_cores : int (optional)
         Number of cores to use for parallel processing, default is None
@@ -544,7 +551,7 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
     '''
         
     models = run_params['dropouts'].keys()
-    if use_dask:
+    if parallel:
         lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold = \
             collect_fold_results_dask(run_params, fit_params, 
                                       X_train_outer, X_test_outer,
@@ -718,6 +725,28 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     return lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio
 
 
+
+############
+# Checking and validation
+def check_nan_weights(W, run_params):
+    weights = W.weights.values
+    model_labels = W.model.values
+
+    assert set(model_labels) == set(run_params['dropouts'].keys()), 'Not all models in rum_params were run'
+    for model_label in model_labels:
+    # model_label = model_labels[3]
+    # print(model_label)
+        model_kernels = run_params['dropouts'][model_label]['kernels']    
+        run_weights = [w for w in weights if np.any([mk in w for mk in model_kernels])]
+        dropped_weights = [w for w in weights if np.all([mk not in w for mk in model_kernels])]
+
+        # are all run_weights finite?
+        assert np.all(np.isfinite(W.sel(weights=run_weights, model=model_label))), "Detected NaN for fit weights"
+        # are all dropped_weights nan?
+        assert np.all(np.isnan(W.sel(weights=dropped_weights, model=model_label))), "Detected a value(s) for dropped weights"
+    return True
+
+
 ############################################################################################
 # gathering session model traces
 # one from splits, another from the mean model
@@ -777,7 +806,7 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
             session_model_from_splits[test_frames, :, mi] = X_model.values @ W_fold_model.values
 
     # getting session model from mean coefficients across splits
-    W_mean = W_cv.mean(dim='test_fold_ind')
+    W_mean = W_cv.mean(dim='test_fold_ind') #TODO: check if nanmean is necessary
     session_model_from_mean_W = xr.full_like(session_model_from_splits, fill_value=0, dtype=float)
     for model in models:
         W_model = W_mean.sel(model=model)
@@ -807,7 +836,7 @@ def get_full_session_var_ratio_from_mean_model(W_cv, X_trim, response_trim):
         Variance ratio from the mean model
     '''
     # mean model and variance ratio
-    W_mean = W_cv.mean(dim='test_fold_ind')
+    W_mean = W_cv.mean(dim='test_fold_ind') #TODO: check if nanmean is necessary
     for mi, model in enumerate(W_mean.model.values):
         W_model = W_mean.sel(model=model)
         weights = W_model.dropna(dim='weights').weights.values
@@ -829,8 +858,7 @@ def save_glm_restuls(dm_version, session_name, data_type,
                      lambdas_cv, W_cv, 
                      var_ratio_train_cv, var_ratio_test_cv, 
                      vr_test_train_ratio_cv, var_ratio_mean_model,
-                     save_dir_base='/root/capsule/scratch',
-                     folder_name=None):
+                     save_dir):
     glm_results = {'fit_params': fit_params,
                 'use_indices': use_indices,
                 'stratified_frames': stratified_frames,
@@ -841,11 +869,23 @@ def save_glm_restuls(dm_version, session_name, data_type,
                 'var_ratio_test_cv': var_ratio_test_cv,
                 'vr_test_train_ratio_cv': vr_test_train_ratio_cv,
                 'var_ratio_mean_model': var_ratio_mean_model}
-    if type(save_dir) == str:
-        save_dir_base = Path(save_dir_base)
-    if folder_name is None:
-        folder_name = f'glm_results_v{dm_version:02}_{session_name}_{data_type}'
-    save_dir = save_dir_base / folder_name
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
     save_fn = save_dir / f'glm_results_v{dm_version:02}_{session_name}_{data_type}.npy'
+    if save_fn.exists():
+        print(f'\n\n{save_fn} exists!\n\nAdding_suffix...')
+        fn_base = f'glm_results_v{dm_version:02}_{session_name}_{data_type}'
+        fn_list = [Path(fp).name for fp in glob(str(save_dir / fn_base) + '*')]
+        suffixes = [fn.split(f'{fn_base}')[1].split('.')[0] for fn in fn_list]
+        suffixes = [s.split('_')[1] for s in suffixes if len(s)>0]
+        if len(suffixes) == 0:
+            new_suffix = '_00'
+        else:
+            assert [s.isnumeric() for s in suffixes]
+            max_suffix = np.max([int(s) for s in suffixes])
+            new_suffix = f'_{max_suffix + 1:02}'
+        save_fn = save_dir / f'{fn_base}{new_suffix}.npy'
+        assert not save_fn.exists()
+        print(f'New save filename  = {save_fn}')
     np.save(save_fn, glm_results)
     return save_fn
