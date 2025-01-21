@@ -2,116 +2,140 @@
 	"version": 1,
 	"attached_datasets": [
 		{
-			"id": "24e5da9c-17bc-4df2-becd-0782724efaa5",
-			"mount": "response_matrix_multiplane-ophys_721291_2024-05-16_08-57-00_filtered_events"
+			"id": "0baca7fb-0c13-4c39-b2e0-61e1b42f1e4e",
+			"mount": "multiplane-ophys_736963_2024-07-24_08-49-57_processed_2024-11-20_20-41-20"
 		},
 		{
-			"id": "37b99265-d9e4-4b20-ab5e-3c72d2f7199f",
-			"mount": "multiplane-ophys_741866_2024-09-17_09-28-38"
+			"id": "24c8de07-7fd8-49a3-bed9-765be48f3025",
+			"mount": "multiplane-ophys_736963_2024-08-01_08-59-00"
 		},
 		{
-			"id": "39b71cdf-f4a8-4514-aeff-6269dce05bbb",
-			"mount": "multiplane-ophys_741866_2024-09-18_09-46-53_processed_2024-11-19_17-31-51"
+			"id": "25b05075-e928-48fd-b946-6caaa944be2e",
+			"mount": "multiplane-ophys_736963_2024-08-05_09-19-25_dlc-eye_2025-01-18_01-21-51"
 		},
 		{
-			"id": "49713a66-d896-4722-9936-383b48b9479c",
-			"mount": "multiplane-ophys_741865_2024-08-20_09-27-09"
+			"id": "2f5f420e-ff3d-4e3d-aab8-3160de353797",
+			"mount": "multiplane-ophys_736963_2024-08-13_08-57-29_processed_2024-11-20_09-49-54"
 		},
 		{
-			"id": "4aca2a4b-d175-411c-98a4-821d6b3be9fb",
-			"mount": "multiplane-ophys_741865_2024-09-10_09-38-57"
+			"id": "2fa23d42-9734-43d8-a3b4-6655e1d4441f",
+			"mount": "multiplane-ophys_736963_2024-08-09_08-58-36_processed_2024-11-20_09-51-23"
 		},
 		{
-			"id": "666da7d6-6150-4a09-9000-0f643f5e1809",
-			"mount": "multiplane-ophys_741865_2024-09-16_09-20-21_processed_2024-11-19_21-10-51"
+			"id": "2fcadf6d-26ae-454a-bcc3-87ba5dcec4c3",
+			"mount": "multiplane-ophys_736963_2024-07-24_08-49-57"
 		},
 		{
-			"id": "688b3ef8-a31d-43ea-aa32-1c1fba769e60",
-			"mount": "multiplane-ophys_741866_2024-09-23_09-25-20_processed_2024-11-19_14-37-27"
+			"id": "36a396c1-6299-494a-9e1e-f817dce03b1a",
+			"mount": "multiplane-ophys_736963_2024-07-30_09-11-03_processed_2024-11-20_21-02-00"
 		},
 		{
-			"id": "73305baf-259f-419f-8087-d5e78f1761da",
-			"mount": "multiplane-ophys_741866_2024-09-20_09-19-38_processed_2024-11-19_13-29-20"
+			"id": "3c3b3d06-f6fd-484a-8955-53a02d8a0fe1",
+			"mount": "multiplane-ophys_736963_2024-08-12_09-17-19_processed_2024-11-20_10-22-34"
 		},
 		{
-			"id": "83abceff-132c-43d8-a1f4-9d45e53a45d6",
-			"mount": "multiplane-ophys_741866_2024-09-17_09-28-38_processed_2024-11-19_13-29-07"
+			"id": "3fc747df-a25f-4cee-97ff-b89d8bf70557",
+			"mount": "multiplane-ophys_736963_2024-08-12_09-17-19"
 		},
 		{
-			"id": "87e5a7ab-40f3-4c54-a48a-dc9c48ff1e61",
-			"mount": "multiplane-ophys_741865_2024-09-05_09-09-30_processed_2024-11-19_08-22-40"
+			"id": "4768097c-fdd6-460a-b5a7-1259dcd3e67f",
+			"mount": "multiplane-ophys_736963_2024-08-07_09-11-10_processed_2024-11-20_10-34-04"
 		},
 		{
-			"id": "8f01c7aa-57cc-421c-a7ed-593a1da8e0d4",
-			"mount": "multiplane-ophys_741865_2024-09-04_09-28-30"
+			"id": "4902f636-0ce2-495c-927b-a2b44b818588",
+			"mount": "multiplane-ophys_736963_2024-08-09_08-58-36_dlc-eye_2025-01-18_01-07-18"
 		},
 		{
-			"id": "92d13ff8-544e-4988-9c5e-19a81be805ee",
-			"mount": "multiplane-ophys_741865_2024-09-13_09-52-11_processed_2024-11-19_13-46-55"
+			"id": "5085308a-c0d2-4e2c-94f3-6eb80a33a37c",
+			"mount": "multiplane-ophys_736963_2024-08-05_09-19-25"
 		},
 		{
-			"id": "959d582a-c31d-4038-8088-6aa558f331ef",
-			"mount": "multiplane-ophys_741866_2024-09-27_09-06-49_processed_2024-11-19_16-55-41"
+			"id": "511a9917-6473-474e-ae01-c2a1146cfd73",
+			"mount": "multiplane-ophys_736963_2024-08-06_08-52-03_dlc-eye_2025-01-18_00-42-40"
 		},
 		{
-			"id": "9a153598-93e2-49e7-bc87-eb04c9b9255d",
-			"mount": "multiplane-ophys_741866_2024-09-18_09-46-53"
+			"id": "6305dacd-6720-4c64-9fba-6d94a9bcaedb",
+			"mount": "multiplane-ophys_736963_2024-08-01_08-59-00_processed_2024-11-20_21-00-05"
 		},
 		{
-			"id": "9af8c4c1-71ad-4732-ad62-59ca875c7720",
-			"mount": "design_matrix_v00_multiplane-ophys_721291_2024-05-16_08-57-00"
+			"id": "6ecfb6fd-dc56-4224-9998-b2e4d3d53f51",
+			"mount": "multiplane-ophys_736963_2024-07-30_09-11-03"
 		},
 		{
-			"id": "ab6477e2-08b2-4118-9579-82272402a1a1",
-			"mount": "multiplane-ophys_741866_2024-09-23_09-25-20"
+			"id": "708756e2-7cb0-4005-9a4d-ab6dbadf9931",
+			"mount": "multiplane-ophys_736963_2024-08-01_08-59-00_dlc-eye_2025-01-18_01-26-01"
 		},
 		{
-			"id": "c1d32379-e31a-4e44-b252-1effc31b8426",
-			"mount": "multiplane-ophys_741866_2024-09-27_09-06-49"
+			"id": "7ae3a1bf-caca-4d48-9a63-465db8fb02b2",
+			"mount": "multiplane-ophys_736963_2024-07-30_09-11-03_dlc-eye_2025-01-18_00-38-09"
 		},
 		{
-			"id": "c94b4d8e-8867-4475-8b1e-d34b46d959b8",
-			"mount": "multiplane-ophys_741865_2024-08-20_09-27-09_processed_2024-11-19_10-10-16"
+			"id": "8024ee33-c834-46a5-8baa-e61f34132918",
+			"mount": "multiplane-ophys_736963_2024-07-26_09-37-45"
 		},
 		{
-			"id": "ce3b19ab-a940-4726-b3c0-877a7cfa06d5",
-			"mount": "multiplane-ophys_741865_2024-09-06_09-29-21_processed_2024-11-19_15-04-59"
+			"id": "9382976a-4c64-486d-8cee-c8d485770456",
+			"mount": "multiplane-ophys_736963_2024-07-26_09-37-45_dlc-eye_2025-01-18_01-00-08"
 		},
 		{
-			"id": "d428d972-822c-422c-8925-e12ac81d257c",
-			"mount": "multiplane-ophys_741865_2024-08-14_09-40-53_processed_2024-11-19_08-28-12"
+			"id": "9f0cb610-4a53-451d-8a63-691f63ce1659",
+			"mount": "multiplane-ophys_736963_2024-08-12_09-17-19_dlc-eye_2025-01-18_00-59-46"
 		},
 		{
-			"id": "daa8c0a2-3590-4509-a401-a69eba8a8c49",
-			"mount": "multiplane-ophys_741865_2024-09-06_09-29-21"
+			"id": "a494d5a6-b567-4876-9418-155c98ca7e25",
+			"mount": "multiplane-ophys_736963_2024-08-09_08-58-36"
 		},
 		{
-			"id": "e63418ea-2814-4921-8d48-5d77ff8eabf8",
-			"mount": "multiplane-ophys_741865_2024-09-05_09-09-30"
+			"id": "a5827c34-40c5-42e9-b313-177375808914",
+			"mount": "stimuli"
 		},
 		{
-			"id": "ea7fcb7c-46ea-44c6-83f5-303aec5cecbb",
-			"mount": "multiplane-ophys_741865_2024-09-13_09-52-11"
+			"id": "ae65b44f-975c-4253-993d-de4fbd7b21e2",
+			"mount": "multiplane-ophys_736963_2024-08-13_08-57-29"
 		},
 		{
-			"id": "f3297578-ecc8-4e70-b4dc-152a12c96d32",
-			"mount": "multiplane-ophys_741865_2024-09-16_09-20-21"
+			"id": "b1bfe788-dcd6-4de0-8d50-0cebcce1c017",
+			"mount": "multiplane-ophys_736963_2024-07-29_09-00-58"
 		},
 		{
-			"id": "f4473adf-fe70-430f-9cd9-7698d1b41ef7",
-			"mount": "multiplane-ophys_741865_2024-09-04_09-28-30_processed_2024-11-19_12-01-50"
+			"id": "c7ad3686-c50e-4a6c-9670-05bfd44e9221",
+			"mount": "multiplane-ophys_736963_2024-08-06_08-52-03"
 		},
 		{
-			"id": "f70ae718-1100-4e63-90b8-a1405374903c",
-			"mount": "multiplane-ophys_741865_2024-08-14_09-40-53"
+			"id": "d14be361-f51b-44ff-ae8f-ca777abc10f3",
+			"mount": "multiplane-ophys_736963_2024-08-06_08-52-03_processed_2024-11-20_10-55-16"
 		},
 		{
-			"id": "f8a0dc15-1517-4578-b9ee-10a357acef09",
-			"mount": "multiplane-ophys_741865_2024-09-10_09-38-57_processed_2024-11-19_16-11-01"
+			"id": "df5c3704-7354-47dd-96a3-2d291f2c8e98",
+			"mount": "multiplane-ophys_736963_2024-07-29_09-00-58_dlc-eye_2025-01-18_01-25-35"
 		},
 		{
-			"id": "ffa3db2a-badd-4c71-9802-8ab7684d628d",
-			"mount": "multiplane-ophys_741866_2024-09-20_09-19-38"
+			"id": "df6777d7-a989-4adf-9a04-746b089323bf",
+			"mount": "multiplane-ophys_736963_2024-07-29_09-00-58_processed_2024-11-20_20-41-11"
+		},
+		{
+			"id": "e6186244-1d52-4bb5-91e2-abb07a327192",
+			"mount": "multiplane-ophys_736963_2024-08-05_09-19-25_processed_2024-11-20_20-39-02"
+		},
+		{
+			"id": "f1aca486-0aaf-4bf3-81e8-7deefbad9ec6",
+			"mount": "multiplane-ophys_736963_2024-08-13_08-57-29_dlc-eye_2025-01-18_00-47-14"
+		},
+		{
+			"id": "f2cf67b8-990f-4c73-a4fa-9f768c6fd1a3",
+			"mount": "multiplane-ophys_736963_2024-08-07_09-11-10"
+		},
+		{
+			"id": "f2ed68a0-8b26-48bb-b969-0801c549cd1a",
+			"mount": "multiplane-ophys_736963_2024-07-24_08-49-57_dlc-eye_2025-01-18_01-10-41"
+		},
+		{
+			"id": "f3787497-000c-4d7d-80f5-71356e1ee1c7",
+			"mount": "multiplane-ophys_736963_2024-07-26_09-37-45_processed_2024-11-20_20-45-46"
+		},
+		{
+			"id": "fabe9c5f-ab07-4e3e-b57f-892d30eeda4f",
+			"mount": "multiplane-ophys_ROICat_736963_natural_images_250118"
 		}
 	]
 }
