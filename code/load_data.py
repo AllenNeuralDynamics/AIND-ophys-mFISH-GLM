@@ -1,5 +1,6 @@
 from comb.behavior_ophys_dataset import BehaviorOphysDataset, BehaviorMultiplaneOphysDataset
 from comb.behavior_session_dataset import BehaviorSessionDataset
+from lamf_analysis import utils as lamf_utils
 import os
 import glob
 from pathlib import Path
@@ -34,6 +35,13 @@ def load_plane_data(session_name, opid=None, opid_ind=None, data_dir='/root/caps
         raise ValueError('Must provide either opid or opid_ind')
     data_dir = Path(data_dir)
     processed_dirs = glob.glob(str(data_dir / f'{session_name}*processed*'))
+    eye_dirs = glob.glob(str(data_dir / f'{session_name}*dlc-eye*'))
+    if len(eye_dirs) == 0:
+        raise ValueError(f'No eye tracking data found for session {session_name}')
+    elif len(eye_dirs) > 1:
+        raise ValueError(f'Multiple eye tracking data found for session {session_name}')
+    else:
+        eye_path = eye_dirs[0]
     if len(processed_dirs) == 0:
         raise ValueError(f'No processed data found for session {session_name}')
     elif len(processed_dirs) > 1:
@@ -65,9 +73,43 @@ def load_plane_data(session_name, opid=None, opid_ind=None, data_dir='/root/caps
         raise ValueError(f'No raw data found for session {session_name}')
     bod = BehaviorOphysDataset(plane_folder_path=plane_path,
                                raw_folder_path=raw_path,
-                               pipeline_version='v6')    
+                               eye_tracking_path=eye_path,
+                               pipeline_version='v6')
     bod.metadata['ophys_plane_id'] = opid
+    cell_specimen_table = get_roi_df_with_valid_roi(bod)
     return bod
+
+
+def get_roi_df_with_valid_roi(bod, small_roi_radius_threshold_in_um=4):
+    # This mutates bod.cell_specimen_table, so need to be run only once per bod loading
+    cell_specimen_table = bod.cell_specimen_table
+    if np.array([k in cell_specimen_table.columns for k in ['touching_motion_border', 'small_roi', 'valid_roi']]).all():
+        return cell_specimen_table
+    else:
+        plane_path = bod.metadata['plane']['plane_path']
+        range_y, range_x = lamf_utils.get_motion_correction_crop_xy_range(plane_path)
+        range_y = [int(range_y[0]), -int(range_y[1])]
+        range_x = [int(range_x[0]), -int(range_x[1])]
+        
+        on_mask = np.zeros((bod.metadata['plane']['fov_height'], bod.metadata['plane']['fov_width']), dtype=bool)
+        on_mask[range_y[0]:range_y[1], range_x[0]:range_x[1]] = True
+        motion_mask = ~on_mask
+
+        def _touching_motion_border(row, motion_mask):
+            if (row.mask_matrix * motion_mask).any():
+                return True
+            else:
+                return False
+
+        cell_specimen_table['touching_motion_border'] = cell_specimen_table.apply(_touching_motion_border, axis=1, motion_mask=motion_mask)
+        
+        small_roi_radius_threshold_in_pix = small_roi_radius_threshold_in_um / float(bod.metadata['plane']['fov_scale_factor'])
+        area_threshold = np.pi * (small_roi_radius_threshold_in_pix**2)
+        
+        cell_specimen_table['small_roi'] = cell_specimen_table['mask_matrix'].apply(lambda x: len(np.where(x)[0]) < area_threshold)
+        cell_specimen_table['valid_roi'] = ~cell_specimen_table['touching_motion_border'] & ~cell_specimen_table['small_roi']
+    
+    return cell_specimen_table
 
 
 def add_ophys_plane_id(bod):
@@ -97,8 +139,10 @@ def load_behavior_data(session_name, data_dir='/root/capsule/data/'):
 
     data_dir = Path(data_dir)
     raw_dir = data_dir / session_name
+    eye_dir = glob.glob(str(data_dir / f'{session_name}*dlc-eye*'))[0]
     if raw_dir.exists():
-        behavior_dataset = BehaviorSessionDataset(raw_folder_path=raw_dir)
+        behavior_dataset = BehaviorSessionDataset(raw_folder_path=raw_dir,
+                                                  eye_tracking_path=eye_dir)
     else:
         raise ValueError(f'Multiple processed data found for session {session_name}')
 

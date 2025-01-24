@@ -34,6 +34,10 @@
 			"mount": "multiplane-ophys_736963_2024-08-12_09-17-19_processed_2024-11-20_10-22-34"
 		},
 		{
+			"id": "3c8ea6e2-19e4-4260-8145-2ae8b36b3a6d",
+			"mount": "multiplane-ophys_736963_2024-08-07_09-11-10_dlc-eye_2025-01-23_22-38-04"
+		},
+		{
 			"id": "3fc747df-a25f-4cee-97ff-b89d8bf70557",
 			"mount": "multiplane-ophys_736963_2024-08-12_09-17-19"
 		},
@@ -96,6 +100,10 @@
 		{
 			"id": "b1bfe788-dcd6-4de0-8d50-0cebcce1c017",
 			"mount": "multiplane-ophys_736963_2024-07-29_09-00-58"
+		},
+		{
+			"id": "bc19e24e-5f49-448e-8f23-52a7f1b1e706",
+			"mount": "multiplane-ophys_726963_stim-response"
 		},
 		{
 			"id": "c7ad3686-c50e-4a6c-9670-05bfd44e9221",

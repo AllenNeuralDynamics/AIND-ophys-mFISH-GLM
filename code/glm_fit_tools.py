@@ -56,7 +56,7 @@ def default_fit_params():
         'cv_fold': 5,                               # Number of cross-validation folds
         'cv_nested_fold': 5,                        # Number of nested cross-validation folds, for hyperparameter optimization (e.g., L2 lambda)
         'cv_stratify': {                            # Stratify cross-validation folds by these variables (['time', 'image_name', 'running_speed', 'lick_frequency', 'engagement', 'rolling_performance'])
-            'variables': ['time', 'running_speed', 'lick', 'rolling_performance'], # 'time', 'running_speed', 'lick', 'rolling_performance' 
+            'variables': ['time', 'running_speed', 'lick', 'rolling_performance', 'pupil'], # 'time', 'running_speed', 'lick', 'rolling_performance' 
             'num_time_stratification': 5,           # Number of stratification for time. The rest are binary (at least for now)
             # 'stratification_threshold': 0.2,        # Threshold for stratification variable. If smaller portion is lower than this threshold, stratification is not performed (too rare incidents)
             'running_smoothing_s': 10,              # Smoothing window for running speed (seconds)
@@ -127,7 +127,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
         #IMPORTANT: Indices within use_indices.
     '''
     X_trim = X[use_indices, :]
-    stratification_features = ['time', 'running_speed', 'rolling_performance', 'lick']
+    stratification_features = ['time', 'running_speed', 'rolling_performance', 'lick', 'pupil']
     num_stratify_vars = len(fit_params['cv_stratify']['variables'])
     stratified_list = []
     for var in fit_params['cv_stratify']['variables']:    
@@ -176,6 +176,11 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             licking_frames = np.where(lick_freq > fit_params['cv_stratify']['lick_threshold'])[0]
             nonlicking_frames = np.setdiff1d(np.arange(X_trim.shape[0]), licking_frames)
             stratified = [licking_frames, nonlicking_frames]
+            stratified_list.append(stratified)
+        elif var == 'pupil':
+            keyword = 'pupil'
+            pupil_trace = get_var_traces_from_X(X, use_indices, keyword)
+            stratified = [np.where(pupil_trace > 0)[0], np.where(pupil_trace <= 0)[0]]  # using mean of pupil trace to stratify
             stratified_list.append(stratified)
         else:
             print(f'{var} not implemented for stratification.\nImplemented feature keywords: {stratification_features}\nContinue...')
@@ -328,16 +333,25 @@ def fit_regularized(y, X, lam):
 
 def variance_ratio(y, W, X): 
     '''
-    Computes the fraction of variance in fit_trace_arr explained by the linear model Y = X*W
+    Computes the fraction of variance in y explained by the linear model Y = X*W
     
-    fit_trace_arr: (n_timepoints, n_cells)
+    y: (n_timepoints, n_cells)
     W: Xarray (n_kernel_params, n_cells)
     X: Xarray (n_timepoints, n_kernel_params)
     '''
     y_hat = X.values @ W.values
     var_total = np.var(y, axis=0)   # Total variance in the ophys trace for each cell
     var_resid = np.var(y - y_hat, axis=0) # Residual variance in the difference between the model and data
-    return (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
+    var_ratio_full_length = (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
+    
+    mask = X.get_mask()
+    if np.all(mask):  # If all timepoints are used
+        var_ratio_masked = var_ratio_full_length
+    else:
+        var_total_masked = np.var(y[mask, :], axis=0)
+        var_resid_masked = np.var(y[mask, :] - y_hat[mask, :], axis=0)
+        var_ratio_masked = (var_total_masked - var_resid_masked) / var_total_masked
+    return var_ratio_full_length, var_ratio_masked
 
 
 ##############################################################################################################
@@ -417,7 +431,7 @@ def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
         W = fit_regularized(y_train, X_train, lam)
         
         # Compute the variance ratio
-        var_ratio = variance_ratio(y_test, W, X_test)
+        var_ratio, _ = variance_ratio(y_test, W, X_test)
 
         # Expand along the 'lam' dimension
         var_ratio = var_ratio.expand_dims(lam=[lam])
@@ -470,6 +484,8 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         Variance ratio for testing
     vr_test_train_ratio_cv : xr.DataArray
         Ratio of variance ratio for testing and training
+    var_ratio_test_masked_cv : xr.DataArray
+        Variance ratio for testing with support mask
     '''
     for test_fold_ind in range(fit_params['cv_fold']):
         # get test and train fold inds for one cross-validation set
@@ -480,15 +496,17 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         y_train_outer = response_trim[train_frames, :]
         y_test_outer = response_trim[test_frames, :]
         
-        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold = \
-            collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer, nested_fold_inds,
-                                 parallel=parallel, num_cores=num_cores)
+        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, \
+            vr_test_train_ratio_fold, var_ratio_test_masked_fold = \
+                collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer, nested_fold_inds,
+                                    parallel=parallel, num_cores=num_cores)
         
         lambdas_fold = lambdas_fold.expand_dims(test_fold_ind=[test_fold_ind])
         W_fold = W_fold.expand_dims(test_fold_ind=[test_fold_ind])
         var_ratio_train_fold = var_ratio_train_fold.expand_dims(test_fold_ind=[test_fold_ind])
         var_ratio_test_fold = var_ratio_test_fold.expand_dims(test_fold_ind=[test_fold_ind])
         vr_test_train_ratio_fold = vr_test_train_ratio_fold.expand_dims(test_fold_ind=[test_fold_ind])
+        var_ratio_test_masked_fold = var_ratio_test_masked_fold.expand_dims(test_fold_ind=[test_fold_ind])
         
         if test_fold_ind == 0:
             lambdas_cv = lambdas_fold
@@ -496,17 +514,19 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
             var_ratio_train_cv = var_ratio_train_fold
             var_ratio_test_cv = var_ratio_test_fold
             vr_test_train_ratio_cv = vr_test_train_ratio_fold
+            var_ratio_test_masked_cv = var_ratio_test_masked_fold
         else:
             lambdas_cv = xr.concat([lambdas_cv, lambdas_fold], dim='test_fold_ind')
             W_cv = xr.concat([W_cv, W_fold], dim='test_fold_ind')
             var_ratio_train_cv = xr.concat([var_ratio_train_cv, var_ratio_train_fold], dim='test_fold_ind')
             var_ratio_test_cv = xr.concat([var_ratio_test_cv, var_ratio_test_fold], dim='test_fold_ind')
             vr_test_train_ratio_cv = xr.concat([vr_test_train_ratio_cv, vr_test_train_ratio_fold], dim='test_fold_ind')
+            var_ratio_test_masked_cv = xr.concat([var_ratio_test_masked_cv, var_ratio_test_masked_fold], dim='test_fold_ind')
     
     # Validation
     check_nan_weights(W_cv, run_params)
     
-    return lambdas_cv, W_cv, var_ratio_train_cv, var_ratio_test_cv, vr_test_train_ratio_cv
+    return lambdas_cv, W_cv, var_ratio_train_cv, var_ratio_test_cv, vr_test_train_ratio_cv, var_ratio_test_masked_cv
     
     
 
@@ -548,22 +568,26 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
         Variance ratio for testing
     vr_test_train_ratio_fold : xr.DataArray
         Ratio of variance ratio for testing and training
+    var_ratio_masked_fold : xr.DataArray
+        Variance ratio for testing with support mask
     '''
         
     models = run_params['dropouts'].keys()
     if parallel:
-        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold = \
-            collect_fold_results_dask(run_params, fit_params, 
-                                      X_train_outer, X_test_outer,
-                                      y_train_outer, y_test_outer,
-                                      nested_fold_inds, num_cores=num_cores)
+        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, \
+            vr_test_train_ratio_fold, var_ratio_test_masked_fold = \
+                collect_fold_results_dask(run_params, fit_params, 
+                                        X_train_outer, X_test_outer,
+                                        y_train_outer, y_test_outer,
+                                        nested_fold_inds, num_cores=num_cores)
     else:
         for mi, model_label in enumerate(models):
             model_results = collect_model_results(run_params, fit_params,
                                                   X_train_outer, X_test_outer,
                                                   y_train_outer, y_test_outer,
                                                   nested_fold_inds, model_label)
-            (lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio) = model_results
+            (lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio,
+             var_ratio_test_masked) = model_results
             
             # Collect results
             if mi == 0:
@@ -572,14 +596,16 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
                 var_ratio_train_fold = var_ratio_train
                 var_ratio_test_fold = var_ratio_test
                 vr_test_train_ratio_fold = vr_test_train_ratio
+                var_ratio_test_masked_fold = var_ratio_test_masked
             else:
                 lambdas_fold = xr.concat([lambdas_fold, lambdas], dim='model')
                 W_fold = xr.concat([W_fold, W_model], dim='model')
                 var_ratio_train_fold = xr.concat([var_ratio_train_fold, var_ratio_train], dim='model')
                 var_ratio_test_fold = xr.concat([var_ratio_test_fold, var_ratio_test], dim='model')
-            vr_test_train_ratio_fold = xr.concat([vr_test_train_ratio_fold, vr_test_train_ratio], dim='model')
+                vr_test_train_ratio_fold = xr.concat([vr_test_train_ratio_fold, vr_test_train_ratio], dim='model')
+                var_ratio_test_masked_fold = xr.concat([var_ratio_test_masked_fold, var_ratio_test_masked], dim='model')
             
-    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold
+    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold, var_ratio_test_masked_fold
 
 
 def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
@@ -618,6 +644,8 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
         Variance ratio from testing
     vr_test_train_ratio_fold : xr.DataArray
          Ratio of variance ratio between testing and training (for overfitting check)
+    var_ratio_test_masked_fold : xr.DataArray
+        Variance ratio from testing with support mask 
     '''
     with Client() as client:
         tasks = []
@@ -635,21 +663,24 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
         
     # Collect results
     for mi in range(len(models)):
-        (lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio) = model_results[mi]
+        (lambdas, W_model, var_ratio_train, var_ratio_test, 
+         vr_test_train_ratio, var_ratio_test_masked) = model_results[mi]
         if mi == 0:
             lambdas_fold = lambdas
             W_fold = W_model
             var_ratio_train_fold = var_ratio_train
             var_ratio_test_fold = var_ratio_test
             vr_test_train_ratio_fold = vr_test_train_ratio
+            var_ratio_test_masked_fold = var_ratio_test_masked
         else:
             lambdas_fold = xr.concat([lambdas_fold, lambdas], dim='model')
             W_fold = xr.concat([W_fold, W_model], dim='model')
             var_ratio_train_fold = xr.concat([var_ratio_train_fold, var_ratio_train], dim='model')
             var_ratio_test_fold = xr.concat([var_ratio_test_fold, var_ratio_test], dim='model')
             vr_test_train_ratio_fold = xr.concat([vr_test_train_ratio_fold, vr_test_train_ratio], dim='model')
+            var_ratio_test_masked_fold = xr.concat([var_ratio_test_masked_fold, var_ratio_test_masked], dim='model')
             
-    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold
+    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold, var_ratio_test_masked_fold
 
 
 def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
@@ -687,6 +718,8 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
         Variance ratio from testing
     vr_test_train_ratio : xr.DataArray
         Ratio of variance ratio between testing and training (for overfitting check)
+    var_ratio_test_masked : xr.DataArray
+        Variance ratio from testing with support mask
     '''
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
     test_lams = xr.DataArray(test_lams, dims={'lam'})
@@ -711,8 +744,9 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
             W_model = xr.concat([W_model, W_cell], dim="cell_roi_id")
             
     # Calculate performance on train and test sets
-    var_ratio_train = variance_ratio(y_train_outer, W_model, X_train_outer_model)
-    var_ratio_test = variance_ratio(y_test_outer, W_model, x_test_outer_model)
+    var_ratio_train, _ = variance_ratio(y_train_outer, W_model, X_train_outer_model)
+    var_ratio_test, var_ratio_test_masked = \
+        variance_ratio(y_test_outer, W_model, x_test_outer_model)
     vr_test_train_ratio = var_ratio_test / var_ratio_train
     
     # Expand model dimension of the DataArrays
@@ -721,9 +755,9 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     var_ratio_train = var_ratio_train.expand_dims(model=[model_label])
     var_ratio_test = var_ratio_test.expand_dims(model=[model_label])
     vr_test_train_ratio = vr_test_train_ratio.expand_dims(model=[model_label])
+    var_ratio_test_masked = var_ratio_test_masked.expand_dims(model=[model_label])
     
-    return lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio
-
+    return lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio, var_ratio_test_masked
 
 
 ############
@@ -842,13 +876,16 @@ def get_full_session_var_ratio_from_mean_model(W_cv, X_trim, response_trim):
         weights = W_model.dropna(dim='weights').weights.values
         X_model = X_trim.sel(weights=weights)
         W_mean_model = W_model.sel(weights=weights)
-        var_ratio = variance_ratio(response_trim, W_mean_model, X_model)
+        var_ratio, var_ratio_masked = variance_ratio(response_trim, W_mean_model, X_model)
         var_ratio = var_ratio.expand_dims(model=[model])
+        var_ratio_masked = var_ratio_masked.expand_dims(model=[model])
         if mi == 0:
             var_ratio_mean_model = var_ratio
+            var_ratio_masked_mean_model = var_ratio_masked
         else:
             var_ratio_mean_model = xr.concat([var_ratio_mean_model, var_ratio], dim='model')
-    return var_ratio_mean_model
+            var_ratio_masked_mean_model = xr.concat([var_ratio_masked_mean_model, var_ratio_masked], dim='model')
+    return var_ratio_mean_model, var_ratio_masked_mean_model
 
 
 ############################################################################################
@@ -857,7 +894,8 @@ def save_glm_restuls(dm_version, session_name, data_type,
                      fit_params, use_indices, stratified_frames, cv_inds_stratified,
                      lambdas_cv, W_cv, 
                      var_ratio_train_cv, var_ratio_test_cv, 
-                     vr_test_train_ratio_cv, var_ratio_mean_model,
+                     vr_test_train_ratio_cv, var_ratio_test_masked_cv,
+                     var_ratio_mean_model, var_ratio_masked_mean_model,
                      save_dir):
     glm_results = {'fit_params': fit_params,
                 'use_indices': use_indices,
@@ -868,7 +906,9 @@ def save_glm_restuls(dm_version, session_name, data_type,
                 'var_ratio_train_cv': var_ratio_train_cv,
                 'var_ratio_test_cv': var_ratio_test_cv,
                 'vr_test_train_ratio_cv': vr_test_train_ratio_cv,
-                'var_ratio_mean_model': var_ratio_mean_model}
+                'var_ratio_test_masked_cv': var_ratio_test_masked_cv,
+                'var_ratio_mean_model': var_ratio_mean_model,
+                'var_ratio_masked_mean_model': var_ratio_masked_mean_model}
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     save_fn = save_dir / f'glm_results_v{dm_version:02}_{session_name}_{data_type}.npy'
