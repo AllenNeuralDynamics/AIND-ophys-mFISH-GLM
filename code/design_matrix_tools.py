@@ -134,9 +134,9 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         #     timeseries = timeseries['values'].values
         #     timeseries = standardize_inputs(timeseries, mean_center=run_params['mean_center_inputs'],unit_variance=run_params['unit_variance_inputs'])
         elif feature == 'pupil':
-            ophys_eye = process_eye_data(bod, ophys_timestamps=response['timestamps'])
-            timeseries = ophys_eye['pupil_radius_zscore'].values
-            unstd_timeseries = ophys_eyes['pupil_radius'].values
+            ophys_eye = get_pupil_area(bod, ophys_timestamps=response['timestamps'])
+            timeseries = ophys_eye['pupil_area_zscore'].values
+            unstd_timeseries = ophys_eye['pupil_area'].values
         # elif feature == 'lick_model' or feature == 'groom_model':
         #     if not hasattr(bod, 'lick_groom_model'):
         #         bod.lick_groom_model = process_behavior_predictions(bod, ophys_timestamps = response['timestamps'])
@@ -152,7 +152,7 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
             'error_type': 'kernel', 
             'kernel_name': kernel_name, 
             'exception':e.args[0], 
-            'oeid':bod.metadata['ophys_experiment_id'], 
+            'oeid':bod.metadata['ophys_plane_id'], 
             'glm_version':run_params['version']
         }
         # Logging errors due to mongo connection issues
@@ -351,39 +351,60 @@ def add_discrete_kernel_by_label(kernel_name, design, run_params, bod, response)
 
         return design
 
-
-def process_eye_data(bod, ophys_timestamps):
+def get_pupil_area(bod, ophys_timestamps):
     '''
-        Returns a dataframe of eye tracking data with several processing steps
-        1. All columns are interpolated onto ophys timestamps
-        2. Likely blinks are removed with a threshold set by run_params['eye_blink_z']
-        3. After blink removal, a second transient step removes outliers with threshold run_params['eye_tranisent_threshold']
-        4. After interpolating onto the ophys timestamps, Z-scores the eye_width and pupil_radius
-        
-        Does not modifiy the original eye_tracking dataframe
+        New eye_tracking results have bad frames. Use these to filter out
+        Use area instead of radius. No need to calculate radius from area.
+        Just interpolate and z-score the area and return them.
     '''    
 
     # Set parameters for blink detection, and load data
-    eye = bod.eye_tracking.copy(deep=True)
-
-    # Compute pupil radius
-    eye['pupil_radius'] = np.sqrt(eye['pupil_area']*(1/np.pi))
-    
-    # Remove likely blinks and interpolate
-    eye.loc[eye['likely_blink'],:] = np.nan
-    eye = eye.interpolate()
+    eye_df = bod.eye_tracking_table.copy(deep=True)
+    pupil_area_df = eye_df.query('eye_is_bad_frame==False and pupil_is_bad_frame==False')[['timestamps', 'pupil_area']].copy()
 
     # Interpolate everything onto ophys_timestamps
     ophys_eye = pd.DataFrame({'timestamps':ophys_timestamps})
-    z_score = ['eye_width','pupil_radius']
-    for column in eye.keys():
-        if column != 'timestamps':
-            f = scipy.interpolate.interp1d(eye['timestamps'], eye[column], bounds_error=False)
-            ophys_eye[column] = f(ophys_eye['timestamps'])
-            ophys_eye[column].fillna(method='ffill',inplace=True)
-            if column in z_score:
-                ophys_eye[column+'_zscore'] = scipy.stats.zscore(ophys_eye[column],nan_policy='omit')
+    f = scipy.interpolate.interp1d(pupil_area_df['timestamps'], pupil_area_df['pupil_area'], bounds_error=False)
+    ophys_eye['pupil_area'] = f(ophys_eye['timestamps'])
+    ophys_eye['pupil_area'] = ophys_eye['pupil_area'].ffill()
+    ophys_eye['pupil_area_zscore'] = scipy.stats.zscore(ophys_eye['pupil_area'],nan_policy='omit')
     print('                 : '+'Mean Centering')
     print('                 : '+'Standardized to unit variance')
-    return ophys_eye 
+    return ophys_eye
+
+
+# def process_eye_data(bod, ophys_timestamps):
+#     '''
+#         Returns a dataframe of eye tracking data with several processing steps
+#         1. All columns are interpolated onto ophys timestamps
+#         2. Likely blinks are removed with a threshold set by run_params['eye_blink_z']
+#         3. After blink removal, a second transient step removes outliers with threshold run_params['eye_tranisent_threshold']
+#         4. After interpolating onto the ophys timestamps, Z-scores the eye_width and pupil_radius
+        
+#         Does not modifiy the original eye_tracking dataframe
+#     '''    
+
+#     # Set parameters for blink detection, and load data
+#     eye = bod.eye_tracking_table.copy(deep=True)
+
+#     # Compute pupil radius
+#     eye['pupil_radius'] = np.sqrt(eye['pupil_area']*(1/np.pi))
+    
+#     # Remove likely blinks and interpolate
+#     eye.loc[eye['likely_blink'],:] = np.nan
+#     eye = eye.interpolate()
+
+#     # Interpolate everything onto ophys_timestamps
+#     ophys_eye = pd.DataFrame({'timestamps':ophys_timestamps})
+#     z_score = ['eye_width','pupil_radius']
+#     for column in eye.keys():
+#         if column != 'timestamps':
+#             f = scipy.interpolate.interp1d(eye['timestamps'], eye[column], bounds_error=False)
+#             ophys_eye[column] = f(ophys_eye['timestamps'])
+#             ophys_eye[column].fillna(method='ffill',inplace=True)
+#             if column in z_score:
+#                 ophys_eye[column+'_zscore'] = scipy.stats.zscore(ophys_eye[column],nan_policy='omit')
+#     print('                 : '+'Mean Centering')
+#     print('                 : '+'Standardized to unit variance')
+#     return ophys_eye 
 

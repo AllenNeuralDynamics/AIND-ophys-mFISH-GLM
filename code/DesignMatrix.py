@@ -21,7 +21,7 @@ class DesignMatrix(object):
         self.unstd_features = {}
 
 
-    def make_labels(self, label, num_weights,offset, length): 
+    def make_labels(self, label, num_weights, offset, length): 
         base = [label] * num_weights 
         numbers = [str(x) for x in np.array(range(0,length+1))+offset]
         return [x[0] + '_'+ x[1] for x in zip(base, numbers)]
