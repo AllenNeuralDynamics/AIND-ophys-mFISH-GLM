@@ -1,10 +1,9 @@
-from sklearn.metrics import silhouette_score
-from sklearn.cluster import KMeans
-from sklearn.cluster import SpectralClustering
+
 import numpy as np
 import pandas as pd
 import pickle
 import os
+from tqdm import tqdm
 
 from scipy.stats import spearmanr
 from scipy.stats import kruskal
@@ -15,8 +14,11 @@ from scipy.stats import chisquare
 from scipy import stats
 
 from sklearn.metrics import silhouette_score
+from sklearn.metrics import davies_bouldin_score
+from sklearn.metrics import calinski_harabasz_score
 from sklearn.metrics import pairwise_distances
 from sklearn.cluster import SpectralClustering
+from sklearn.cluster import KMeans
 
 # from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorOphysProjectCache as bpc
 # cache_dir = loading.get_analysis_cache_dir()
@@ -31,6 +33,10 @@ from scipy import signal
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist, pdist
 import seaborn as sns
+
+from dask import delayed, compute
+from dask.distributed import Client
+
 
 ########################################################
 ## VBA dimensionality reduction > clustering > plotting
@@ -188,44 +194,28 @@ def plot_gap_statistic_with_sem(gap_statistics, n_clusters=None, tag='', save_di
         utils.save_figure(fig, figsize, save_dir, folder, 'Gap_' + suffix, formats=['.png', '.pdf'] )
 
 
-def plot_eigengap_values(eigenvalues_cre, cre_lines, n_clusters_cre=None, save_dir=None, folder=None):
+def plot_eigengap_values(eigenvalues, n_clusters=None, save_dir=None, folder=None):
 
-    if n_clusters_cre is None:
-        n_clusters_cre = processing.get_n_clusters_cre()
-
-    for cre_line in cre_lines:
-        if len(eigenvalues_cre[cre_line]) < 4:  # patchwork her.
-            eigenvalues = eigenvalues_cre[cre_line][1]
-        else:
-            eigenvalues = eigenvalues_cre[cre_line]
-        n_clusters = n_clusters_cre[cre_line]
-        suffix = cre_line
-        title = processing.get_cre_line_map(cre_line)  # get a more interpretable cell type name
-
-        figsize = (10,3)
-        fig, ax = plt.subplots(1, 2, figsize=figsize)
-        ax[0].plot(np.arange(1, len(eigenvalues) + 1), eigenvalues, '-o')
-        # ax[0].grid()
-        ax[0].set_ylabel('Eigen values \n(sorted)')
-        ax[0].set_xlabel('Eigen number')
-        ax[0].set_xlim([0, 20])
+    figsize = (10,3)
+    fig, ax = plt.subplots(1, 2, figsize=figsize)
+    ax[0].plot(np.arange(1, len(eigenvalues) + 1), eigenvalues, '-o')
+    ax[0].set_ylabel('Eigen values \n(sorted)')
+    ax[0].set_xlabel('Eigen number')
+    ax[0].set_xlim([0, 20])
+    if n_clusters is not None:
         ax[0].axvline(x=n_clusters, ymin=0, ymax=1, linestyle='--', color='gray')
 
-        ax[1].plot(np.arange(2, len(eigenvalues) + 1), np.diff(eigenvalues), '-o')
-        ax[1].set_ylabel('Eigengap value \n(difference)')
-        ax[1].set_xlabel('Eigen number')
-        ax[1].set_xlim([0, 20])
-        ax[1].set_ylim([0, 0.10])
-        # ax[1].grid()
+    ax[1].plot(np.arange(2, len(eigenvalues) + 1), np.diff(eigenvalues), '-o')
+    ax[1].set_ylabel('Eigengap value \n(difference)')
+    ax[1].set_xlabel('Eigen number')
+    ax[1].set_xlim([0, 20])
+    ax[1].set_ylim([0, 0.10])
+    if n_clusters is not None:
         ax[1].axvline(x=n_clusters, ymin=0, ymax=1, linestyle='--', color='gray')
 
-        if len(cre_lines) > 1:
-            plt.suptitle(title, x=0.5, y=1, fontsize=16)
-
-        plt.subplots_adjust(wspace=0.4)
-        if save_dir:
-            utils.save_figure(fig, figsize, save_dir, folder, 'eigengap' + suffix)
-
+    plt.subplots_adjust(wspace=0.4)
+    if save_dir:
+        utils.save_figure(fig, figsize, save_dir, folder, 'eigengap' + suffix)
 
 
 def plot_silhouette_scores(X=None, model=KMeans, silhouette_scores=None, silhouette_std=None,
@@ -272,6 +262,38 @@ def plot_umap_with_labels(X, labels, ax=None, filename_string=''):
     return ax
 
 
+def plot_coclustering_matrix_sorted_by_cluster_size(coclustering_df, cluster_meta, 
+                                                    save_dir=None, folder=None, suffix='', ax=None):
+    """
+    plot co-clustering matrix sorted by cluster size for a given cre_line
+    will save plot if save_dir and folder are provided (and ax is None)
+    if ax is provided, will plot on provided ax
+    """
+    cluster_meta = cluster_meta.sort_values(by='cluster_id')
+    sorted_cell_specimen_ids = cluster_meta.index.values
+    # sort rows and cols of coclustering matrix by sorted cell_specimen_ids
+    sorted_coclustering_matrix = coclustering_df.loc[sorted_cell_specimen_ids]
+    sorted_coclustering_matrix = sorted_coclustering_matrix[sorted_cell_specimen_ids]
+
+    if ax is None:
+        figsize = (8, 8)
+        fig, ax = plt.subplots(figsize=figsize)
+    ax = sns.heatmap(sorted_coclustering_matrix, cmap="Greys", ax=ax, square=True,
+                     cbar=True, cbar_kws={"drawedges": False, "label": 'probability of\nco-clustering', 'shrink': 0.7, },)
+
+    ax.set_yticks((0, sorted_coclustering_matrix.shape[0]))
+    ax.set_yticklabels((0, sorted_coclustering_matrix.shape[0]), fontsize=20)
+    ax.set_ylabel('cells', fontsize=20)
+    ax.set_xticks((0, sorted_coclustering_matrix.shape[0]))
+    ax.set_xticklabels((0, sorted_coclustering_matrix.shape[0]), fontsize=20, rotation=0)
+    ax.set_xlabel('')
+    sns.despine(ax=ax, bottom=False, top=False, left=False, right=False)
+    if save_dir:
+        filename = 'coclustering_matrix_sorted_by_cluster_size_' + suffix
+        utils.save_figure(fig, figsize, save_dir, folder, filename)  # saving to PDF is super slow
+    return ax
+
+
 def plot_clusters(dropout_df, cluster_df=None, plot_difference=False, mean_response_df=None, save_plots=False, path=None):
     '''
     Plots heatmaps and descriptors of clusters.
@@ -288,7 +310,7 @@ def plot_clusters(dropout_df, cluster_df=None, plot_difference=False, mean_respo
     cluster_ids = cluster_df['cluster_id'].value_counts().index.values  # sort cluster ids by size
     n_clusters = len(cluster_ids)
     palette = utils.get_cre_line_colors()
-    palette_exp = utils.get_experience_level_colors()
+    palette_exp = get_experience_level_colors()
     depths = [75, 175, 275, 375]
     areas = ['VISp', 'VISl']
 
@@ -473,7 +495,7 @@ def plot_clusters_columns_all_cre_lines(df, df_meta, labels_cre, multi_session_d
         cluster_ids = cluster_df.groupby(['cluster_id']).count()[['cell_specimen_id']].sort_values(by='cell_specimen_id').index.values
         n_clusters = len(cluster_ids)
         # palette = utils.get_cre_line_colors()
-        palette_exp = utils.get_experience_level_colors()
+        palette_exp = get_experience_level_colors()
         depths = [75, 175, 275, 375]
         areas = ['VISp', 'VISl']
 
@@ -757,6 +779,66 @@ def plot_cluster_density(df_dropouts=None, labels_list=None, cluster_corrs=None,
 
 ########################################################
 ## VBA dimensionality reduction > clustering > processing
+def load_eigengap(glm_version, feature_matrix, cell_metadata=None, save_dir=None, k_max=25):
+    """
+    if eigengap values were computed and file exists in save_dir, load it
+    otherwise run get_eigenDecomposition for a range of 1 to k_max clusters
+    returns dictionary of eigengap for each cre line = [nb_clusters, eigenvalues, eigenvectors]
+    # this doesnt actually take too long, so might not be a huge need to save files besides records
+    """
+    eigengap_filename = f'eigengap_{glm_version:2}_k_max_{k_max}.pkl'
+    eigengap_path = os.path.join(save_dir, eigengap_filename)
+    if os.path.exists(eigengap_path):
+        print('loading eigengap values scores from', eigengap_path)
+        with open(eigengap_path, 'rb') as f:
+            eigengap = pickle.load(f)
+            f.close()
+        print('done')
+    else:
+        X = feature_matrix.values
+        sc = SpectralClustering(2)  # N of clusters does not impact affinity matrix
+        # but you can obtain affinity matrix only after fitting, thus some N of clusters must be provided.
+        sc.fit(X)
+        A = sc.affinity_matrix_
+        eigenvalues, eigenvectors, nb_clusters = get_eigenDecomposition(A, max_n_clusters=k_max)
+        eigengap = [nb_clusters, eigenvalues, eigenvectors]
+        save_clustering_results(eigengap, filename_string=eigengap_filename, path=save_dir)
+    return eigengap
+
+
+def get_eigenDecomposition(A, max_n_clusters=25):
+    """
+    Input:
+    A: Affinity matrix from spectral clustering
+    max_n_clusters
+
+    :return A tuple containing:
+    - the optimal number of clusters by eigengap heuristic
+    - all eigen values
+    - all eigen vectors
+
+    This method performs the eigen decomposition on a given affinity matrix,
+    following the steps recommended in the paper:
+    1. Construct the normalized laplacian matrix: L = D−1/2ADˆ −1/2.
+    2. Find the eigenvalues and their associated eigen vectors
+    3. Identify the maximum gap which corresponds to the number of clusters
+    by eigengap heuristic
+
+    References:
+    https://papers.nips.cc/paper/2619-self-tuning-spectral-clustering.pdf
+    """
+    L = csgraph.laplacian(A, normed=True)
+    # n_components = A.shape[0]
+    eigenvalues, eigenvectors = np.linalg.eigh(L)
+
+    # Identify the optimal number of clusters as the index corresponding
+    # to the larger gap between eigen values
+    index_largest_gap = np.argsort(np.diff(eigenvalues))[::-1][:max_n_clusters]
+    nb_clusters = index_largest_gap + 1
+
+    return eigenvalues, eigenvectors, nb_clusters
+
+
 def get_silhouette_scores(X, model=SpectralClustering, n_clusters=np.arange(2, 10), metric='euclidean', n_boots=20):
     '''
     Computes silhouette scores for given n clusters.
@@ -883,7 +965,7 @@ def save_clustering_results(data, filename_string='', path=None):
     :return:
     '''
     if path is None:
-        path = r'//allen/programs/braintv/workgroups/nc-ophys/visual_behavior/summary_plots/glm/SpectralClustering/files'
+        path = '/root/capsule/scratch/cluster_results/'
 
     if os.path.exists(path) is False:
         os.mkdir(path)
@@ -1027,7 +1109,7 @@ def shuffle_dropout_score(df_dropout, shuffle_type='all'):
     regressors = df_dropout.columns.levels[0].values
     experience_levels = df_dropout.columns.levels[1].values
     if shuffle_type == 'all':
-        print('shuffling all data')
+        # print('shuffling all data')
         for column in df_dropout.columns:
             df_shuffled[column] = df_dropout[column].sample(frac=1).values
 
@@ -1096,7 +1178,8 @@ def compute_inertia(a, X, metric = 'euclidean'):
     return np.mean(W)
 
 
-def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', metric='euclidean'):
+def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', metric='euclidean',
+                parallel=False):
     '''
     Computes gap statistic between clustered data (ondata inertia) and null hypothesis (reference intertia).
 
@@ -1107,6 +1190,7 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     :param reference: (str) what type of shuffle to use, shuffle_dropout_scores,
             None is use random normal distribution
     :param metric: (str) type of distance to use, default = 'euclidean'
+    :param parallel: (bool) default = False, use parallel computing to speed up the process
     
     :return:
     gap: array of gap values that are the difference between two inertias
@@ -1114,6 +1198,8 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     ondata_inertia: array of log of ondata inertia
     
     TODO: can be improved using parallel computing
+    dask parallelization at the level of within n_boots made it slower.
+    CPU usage near full without parallelization
     '''
 
     if len(data.shape) == 1:
@@ -1129,30 +1215,53 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     reference_sem = []
     gap_mean = []
     gap_sem = []
-    for k in range(1, k_max):
-        local_ref_inertia = []
-        for _ in range(n_boots):
-            # draw random dist or shuffle for every nboot
-            if reference_shuffle is None:
-                reference = np.random.rand(*data.shape) * -1
-            else:
-                reference_df = shuffle_dropout_score(data, shuffle_type=reference_shuffle)
-                reference = reference_df.values
+    
+    def _compute_inertia_shuffled(k, data, reference_shuffle, clustering, metric):
+        # draw random dist or shuffle
+        if reference_shuffle is None:
+            reference = np.random.rand(*data.shape) * -1
+        else:
+            reference_df = shuffle_dropout_score(data, shuffle_type=reference_shuffle)
+            reference = reference_df.values
 
-            clustering.n_clusters = k
-            assignments = clustering.fit_predict(reference)
-            local_ref_inertia.append(compute_inertia(assignments, reference, metric=metric))
+        clustering.n_clusters = k
+        assignments = clustering.fit_predict(reference)
+        return compute_inertia(assignments, reference, metric=metric)
+    
+    for k in range(1, k_max):
+        print(f'Reference inertia for {k} clusters')
+        if parallel:
+            task = []
+            with Client() as client:
+                for _ in range(n_boots):
+                     task.append(delayed(_compute_inertia_shuffled)(k, data, reference_shuffle, clustering, metric))
+                local_ref_inertia = compute(task)
+        else:
+            local_ref_inertia = []
+            for _ in range(n_boots):
+                local_ref_inertia.append(_compute_inertia_shuffled(k, data, reference_shuffle, clustering, metric))
         reference_inertia.append(np.mean(local_ref_inertia))
         reference_sem.append(sem(local_ref_inertia))
 
+    def _compute_ondata_inertia(k, data, clustering, metric):
+        clustering.n_clusters = k
+        assignments = clustering.fit_predict(data)
+        return compute_inertia(assignments, data, metric=metric)
+    
     ondata_inertia = []
     ondata_sem = []
-    for k in range(1, k_max ):
-        local_ondata_inertia = []
-        for _ in range(n_boots):
-            clustering.n_clusters = k
-            assignments = clustering.fit_predict(data_array)
-            local_ondata_inertia.append(compute_inertia(assignments, data_array, metric=metric))
+    for k in range(1, k_max):
+        print(f'On data inertia for {k} clusters')
+        if parallel:
+            task = []
+            with Client() as client:
+                for _ in range(n_boots):
+                    task.append(delayed(_compute_ondata_inertia)(k, data_array, clustering, metric))
+                local_ondata_inertia = compute(task)
+        else:
+            local_ondata_inertia = []
+            for _ in range(n_boots):
+                local_ondata_inertia.append(_compute_ondata_inertia(k, data_array, clustering, metric))
         ondata_inertia.append(np.mean(local_ondata_inertia))
         ondata_sem.append(sem(local_ondata_inertia))
 
@@ -1223,6 +1332,88 @@ def get_conditions_string(data_type, conditions):
     return conditions_string
 
 
+def remap_coding_scores_to_session_colors(coding_scores):
+    """
+    coding_scores is an array where rows are cells (or cluster ids) and columns are experience level / coding feature combinations
+    """
+    coding_scores_remapped = coding_scores.copy()
+
+
+    colors = get_experience_level_colors()
+    # colors = c_vals # Kyle's colors
+    coding_score_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", ["white", colors[0], "white", colors[1],
+                                                                                 "white", colors[2]])
+
+    # familiar sessions are in scale of 0-1 already
+    # add 2 to novel sessions to make them in the scale of colors[1]
+    coding_scores_remapped.loc[:, (slice(None), "Novel")] += 2
+    coding_scores_remapped.loc[:, (slice(None), "Novel +")] += 4
+
+    # return max value for plotting
+    vmax = 5
+
+    return coding_scores_remapped, coding_score_cmap, vmax
+
+
+def plot_feature_matrix_sorted(feature_matrix, cluster_meta, sort_col='cluster_id', use_abbreviated_labels=False,
+                               resort_by_size=False, cmap='Blues', vmax=1, save_dir=None, folder=None, suffix=''):
+    """
+    plots feature matrix used for clustering sorted by sort_col
+
+    sort_col: column in cluster_meta to sort rows of feature_matrix (cells) by
+    """
+    # check if there are negative values in feature_matrix, if so, use diff cmap and set vmin to -1
+    if len(np.where(feature_matrix < 0)[0]) > 0:
+        vmin = -1
+    else:
+        vmin = 0
+
+    figsize = (15, 5)
+    fig, ax = plt.subplots(1, 3, figsize=figsize)
+    for i, cre_line in enumerate(get_cre_lines(cluster_meta)):
+        cluster_meta_cre = cluster_meta[cluster_meta.cre_line == cre_line]
+        # get cell ids for this cre line in sorted order
+        if resort_by_size:
+            cluster_size_order = cluster_meta_cre['cluster_id'].value_counts().index.values
+            cluster_meta_cre['size_sort_cluster_id'] = [np.where(cluster_size_order == label)[0][0] for label in
+                                                  cluster_meta_cre.cluster_id.values]
+            sort_col = 'size_sort_cluster_id'
+        sorted_cluster_meta_cre = cluster_meta_cre.sort_values(by=sort_col)
+        cell_order = sorted_cluster_meta_cre.index.values
+        label_values = sorted_cluster_meta_cre[sort_col].values
+
+        # get data from feature matrix for this set of cells
+        data = feature_matrix.loc[cell_order]
+        ax[i] = sns.heatmap(data.values, cmap=cmap, ax=ax[i], vmin=vmin, vmax=vmax,
+                            robust=True, cbar_kws={"drawedges": False, "shrink": 0.7, "label": 'coding score'})
+
+        for x in [3, 6, 9]:
+            ax[i].axvline(x=x, ymin=0, ymax=data.shape[0], color='gray', linestyle='--', linewidth=1)
+        ax[i].set_title(get_cell_type_for_cre_line(cre_line, cluster_meta))
+        ax[i].set_ylabel('cells')
+        ax[i].set_ylim(0, data.shape[0])
+        ax[i].set_yticks([0, data.shape[0]])
+        ax[i].set_yticklabels((0, data.shape[0]), fontsize=14)
+        ax[i].set_ylim(ax[i].get_ylim()[::-1])  # flip y axes so larger clusters are on top
+        ax[i].set_xlabel('')
+        ax[i].set_xlim(0, data.shape[1])
+        ax[i].set_xticks(np.arange(0, data.shape[1]) + 0.5)
+        if use_abbreviated_labels:
+            xticklabels = [get_abbreviated_experience_levels([key[1]])[0] + ' -  ' + get_abbreviated_features([key[0]])[0].upper() for key in list(data.keys())]
+            ax[i].set_xticklabels(xticklabels, rotation=90, fontsize=14)
+        else:
+            ax[i].set_xticklabels([key[1] + ' -  ' + key[0] for key in list(data.keys())], rotation=90, fontsize=14)
+
+        # plot a line at the division point between clusters
+        cluster_divisions = np.where(np.diff(label_values) == 1)[0]
+        for y in cluster_divisions:
+            ax[i].hlines(y, xmin=0, xmax=data.shape[1], color='k')
+
+    fig.subplots_adjust(wspace=0.7)
+    if save_dir:
+        utils.save_figure(fig, figsize, save_dir, folder, 'feature_matrix_sorted_by_' + sort_col + suffix)
+        
+        
 def plot_flashes_on_trace(ax, timestamps, change=None, omitted=False, alpha=0.075, facecolor='gray'):
     """
     plot stimulus flash durations on the given axis according to the provided timestamps
