@@ -14,6 +14,10 @@
 			"mount": "multiplane-ophys_736963_2024-08-05_09-19-25_dlc-eye_2025-01-18_01-21-51"
 		},
 		{
+			"id": "2adc2a84-d7ac-4ba0-ae38-19c211daab88",
+			"mount": "single_cell_mean_responses_736963_natural_images_condition_v0"
+		},
+		{
 			"id": "2f5f420e-ff3d-4e3d-aab8-3160de353797",
 			"mount": "multiplane-ophys_736963_2024-08-13_08-57-29_processed_2024-11-20_09-49-54"
 		},

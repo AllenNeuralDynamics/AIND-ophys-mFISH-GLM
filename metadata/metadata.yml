@@ -1,5 +1,5 @@
 metadata_version: 1
-name: AIND-ophys-mFISH-GLM
+name: Marina's Copy of AIND-ophys-mFISH-GLM
 description: |-
   Using design matrix dataAsset, fit GLM and save the results.
   - Currently supports L2 regularized Gaussian GLM.
