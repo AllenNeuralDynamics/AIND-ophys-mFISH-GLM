@@ -35,7 +35,10 @@ RUN pip install -U --no-cache-dir \
     pympler \
     codeocean \
     aind-session \
-    tables
+    tables \
+    umap-learn \
+    pyarrow
+
 
 RUN git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \
     && cd aind-codeocean-api \

@@ -42,6 +42,7 @@ def load_plane_data(session_name, opid=None, opid_ind=None, data_dir='/root/caps
         raise ValueError(f'Multiple eye tracking data found for session {session_name}')
     else:
         eye_path = eye_dirs[0]
+        
     if len(processed_dirs) == 0:
         raise ValueError(f'No processed data found for session {session_name}')
     elif len(processed_dirs) > 1:
@@ -77,6 +78,7 @@ def load_plane_data(session_name, opid=None, opid_ind=None, data_dir='/root/caps
                                pipeline_version='v6')
     bod.metadata['ophys_plane_id'] = opid
     cell_specimen_table = get_roi_df_with_valid_roi(bod)
+    
     return bod
 
 
@@ -311,7 +313,7 @@ def get_dff_xr(bod, timestamps_to_use):
     #       But if there's no big time penalty to doing it this way, then maybe just leave it be.
     bod = add_ophys_plane_id(bod)
     opid = bod.metadata['ophys_plane_id']    
-    session_unique_csids = [f'{opid}_{int(rn):04}' for rn in valid_events.index.values]
+    session_unique_csids = [f'{opid}_{int(rn):04}' for rn in valid_dff.index.values]
 
     dff_trace_xr = xr.DataArray(
             data = all_dff_to_use.T,

@@ -45,6 +45,50 @@ def load_data(session_name, data_type, dm_version, load_path='/root/capsule/data
     return X, response, response_info, run_params, unstd_features, use_indices 
 
 
+def get_prop_support(response_trim):
+    ''' Get proportion of support for each cell.
+    
+    Parameters
+    ----------
+    response_trim : xr.DataArray
+        Trimmed response matrix (time x cell_roi_id)
+        
+    Returns
+    -------
+    prop_support : np.array
+        Proportion of support for each cell
+    '''
+    prop_support = []
+    for cri in response_trim.cell_roi_id.values:
+        trace = response_trim.sel(cell_roi_id=cri)
+        prop_support.append(len(np.where(trace)[0]) / len(trace))
+    prop_support = np.array(prop_support)
+    return prop_support
+
+
+def filter_response_matrix(response, prop_support_threshold=0.01):
+    '''Filter out cells based on proportion of event frames
+    Particularly useful for events (may not needed for dff)
+    
+    Parameters
+    ----------
+    response : xr.DataArray
+        Response matrix (time x cell_roi_id)
+    prop_support_threshold : float, optional
+        Threshold for proportion of event frames, by default 0.01
+        
+    Returns
+    -------
+    response_filtered : xr.DataArray
+        Filtered response matrix (time x cell_roi_id)
+        
+    '''
+    prop_support = get_prop_support(response)
+    filtered_inds = np.where(prop_support >= prop_support_threshold)[0]
+    response_filtered = response.isel(cell_roi_id=filtered_inds)
+    return response_filtered
+
+
 ## Fitting parameters
 def default_fit_params():
     fit_params = {
@@ -71,7 +115,7 @@ def default_fit_params():
 ##############################################################################################################
 ## Stratification
 # For multiple stratification, stratify per variable and then make combinations
-def get_var_traces_from_X(X, use_indices, keyword):
+def get_feature_traces_from_X(X, use_indices, keyword):
     ''' Get the feature trace from the design matrix X. 
     TODO: If the feature is not in the weights, get the feature from BOD and interpolate to X_trim timepoints.
     
@@ -86,21 +130,21 @@ def get_var_traces_from_X(X, use_indices, keyword):
         
     Returns
     -------
-    var_traces : xr.DataArray
+    feature_traces : xr.DataArray
         Feature trace from the design matrix
     '''
-    var_inds = np.where([keyword in w for w in X.weights.values])[0]
-    if len(var_inds) > 0:
+    feature_inds = np.where([keyword in w for w in X.weights.values])[0]
+    if len(feature_inds) > 0:
         #TODO: consider when running is not in the weights. Need to load BOD and interpolate running to X_trim timepoints
         if len(np.where([f'{keyword}_0' in w for w in X.weights.values])[0]) > 0:
-            var_traces = X.sel(weights=f'{keyword}_0')[use_indices]
+            feature_traces = X.sel(weights=f'{keyword}_0')[use_indices]
         else:
-            first_delay_trace = X.isel(weights=var_inds[0])
+            first_delay_trace = X.isel(weights=feature_inds[0])
             first_delay = int(str(first_delay_trace.weights.values).split('_')[-1])
-            var_traces = first_delay_trace.shift(timestamps=-first_delay)[use_indices]            
+            feature_traces = first_delay_trace.shift(timestamps=-first_delay)[use_indices]            
     else:  #TODO: implement getting the feature trace from... bod?
-        var_traces = None        
-    return var_traces
+        feature_traces = None        
+    return feature_traces
 
 
 def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_rate):
@@ -154,7 +198,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             stratified_list.append(stratified)
         elif var == 'rolling_performance':
             keyword = 'hits'
-            correct = get_var_traces_from_X(X, use_indices, keyword)
+            correct = get_feature_traces_from_X(X, use_indices, keyword)
             # rolling sum
             num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
             rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
@@ -179,7 +223,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             stratified_list.append(stratified)
         elif var == 'pupil':
             keyword = 'pupil'
-            pupil_trace = get_var_traces_from_X(X, use_indices, keyword)
+            pupil_trace = get_feature_traces_from_X(X, use_indices, keyword)
             stratified = [np.where(pupil_trace > 0)[0], np.where(pupil_trace <= 0)[0]]  # using mean of pupil trace to stratify
             stratified_list.append(stratified)
         else:
@@ -331,7 +375,7 @@ def fit_regularized(y, X, lam):
     return W_xarray
 
 
-def variance_ratio(y, W, X): 
+def compute_variance_explained(y, W, X): 
     '''
     Computes the fraction of variance in y explained by the linear model Y = X*W
     
@@ -339,24 +383,43 @@ def variance_ratio(y, W, X):
     W: Xarray (n_kernel_params, n_cells)
     X: Xarray (n_timepoints, n_kernel_params)
     '''
-    y_hat = X.values @ W.values
-    var_total = np.var(y, axis=0)   # Total variance in the ophys trace for each cell
-    var_resid = np.var(y - y_hat, axis=0) # Residual variance in the difference between the model and data
-    var_ratio_full_length = (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
+    y_hat = X @ W
+    # y_hat = X.values @ W.values # if we want to use values directly, we need to validate if kernel names are in the same order
     
-    mask = X.get_mask()
-    if np.all(mask):  # If all timepoints are used
-        var_ratio_masked = var_ratio_full_length
-    else:
-        var_total_masked = np.var(y[mask, :], axis=0)
-        var_resid_masked = np.var(y[mask, :] - y_hat[mask, :], axis=0)
-        var_ratio_masked = (var_total_masked - var_resid_masked) / var_total_masked
-    return var_ratio_full_length, var_ratio_masked
+    var_total = y.var(dim='timestamps')   # Total variance in the ophys trace for each cell
+    var_resid = (y - y_hat).var(dim='timestamps') # Residual variance in the difference between the model and data
+    var_explained = (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
+
+    return var_explained
+
+
+def compute_adjusted_variance_explained(y, W, X, mask):
+    '''
+    Computes the fraction of variance in y explained by the linear model Y = X*W
+    but only looks at the timepoints in mask
+    
+    y: (n_timepoints, n_cells)
+    W: Xarray (n_kernel_params, n_cells)
+    X: Xarray (n_timepoints, n_kernel_params)
+    mask: bool vector (n_timepoints,)
+    '''
+
+    y_hat = X @ W
+    # y_hat = X.values @ W.values # if we want to use values directly, we need to validate if kernel names are in the same order
+
+    # Define variance function that lets us isolate the mask timepoints
+    def my_var(trace, support_mask):
+        mu = trace.mean(dim='timestamps')
+        return ((trace[support_mask, :] - mu)**2).mean(dim='timestamps')
+
+    var_total = my_var(y, mask)#Total variance in the ophys trace for each cell
+    var_resid = my_var(y - y_hat, mask)#Residual variance in the difference between the model and data
+    return (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
 
 
 ##############################################################################################################
 ## Calculating lambdas for ridge regression
-def collect_var_ratio_across_lambdas_and_nested_folds(X, y, nested_fold_inds, fit_params):
+def collect_var_explained_across_lambdas_and_nested_folds(X, y, nested_fold_inds, fit_params):
     ''' Collect variance ratio across lambdas and nested folds.
     
     Parameters
@@ -372,14 +435,14 @@ def collect_var_ratio_across_lambdas_and_nested_folds(X, y, nested_fold_inds, fi
         
     Returns
     -------
-    var_ratio_xr_collected : xr.DataArray
+    var_explained_xr_collected : xr.DataArray
         Variance ratio across lambdas and nested folds
     '''
     assert fit_params['cv_nested_fold'] == len(nested_fold_inds)
     
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
 
-    var_ratio_xr_collected = None  # Start with no data
+    var_explained_xr_collected = None  # Start with no data
     for nfi in range(fit_params['cv_nested_fold']):
         nested_train_inds = np.concatenate([nested_fold_inds[i] for i in range(len(nested_fold_inds)) if i != nfi])
         nested_test_inds = nested_fold_inds[nfi]
@@ -389,19 +452,19 @@ def collect_var_ratio_across_lambdas_and_nested_folds(X, y, nested_fold_inds, fi
         y_test = y[nested_test_inds, :]
         assert X_train.shape[0] + X_test.shape[0] == X.shape[0]
 
-        var_ratio_xr, _ = get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
-        var_ratio_xr = var_ratio_xr.expand_dims(nested_fold_ind=[nfi])
+        var_explained_xr, _ = get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
+        var_explained_xr = var_explained_xr.expand_dims(nested_fold_ind=[nfi])
 
-        if var_ratio_xr_collected is None:
-            var_ratio_xr_collected = var_ratio_xr
+        if var_explained_xr_collected is None:
+            var_explained_xr_collected = var_explained_xr
         else:
-            var_ratio_xr_collected = xr.concat([var_ratio_xr_collected, var_ratio_xr], dim="nested_fold_ind")
+            var_explained_xr_collected = xr.concat([var_explained_xr_collected, var_explained_xr], dim="nested_fold_ind")
         
-    return var_ratio_xr_collected
+    return var_explained_xr_collected
 
 
-def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams):
-    ''' Get variance ratio xarray across lambdas.
+def get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams):
+    ''' Get variance explained xarray across lambdas.
     
     Parameters
     ----------
@@ -418,12 +481,12 @@ def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
         
     Returns
     -------
-    var_ratio_xr : xr.DataArray
+    var_explained_xr : xr.DataArray
         Variance ratio across lambdas
     W_all : xr.DataArray
         Weights across lambdas
     '''
-    var_ratio_xr = None  # Start with no data
+    var_explained_xr = None  # Start with no data
     W_all = None
 
     for lam in test_lams:
@@ -431,16 +494,16 @@ def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
         W = fit_regularized(y_train, X_train, lam)
         
         # Compute the variance ratio
-        var_ratio, _ = variance_ratio(y_test, W, X_test)
+        var_explained = compute_variance_explained(y_test, W, X_test)
 
         # Expand along the 'lam' dimension
-        var_ratio = var_ratio.expand_dims(lam=[lam])
+        var_explained = var_explained.expand_dims(lam=[lam])
         
-        # Concatenate with the existing var_ratio_xr
-        if var_ratio_xr is None:
-            var_ratio_xr = var_ratio  # Initialize with the first DataArray
+        # Concatenate with the existing var_explained_xr
+        if var_explained_xr is None:
+            var_explained_xr = var_explained  # Initialize with the first DataArray
         else:
-            var_ratio_xr = xr.concat([var_ratio_xr, var_ratio], dim="lam")
+            var_explained_xr = xr.concat([var_explained_xr, var_explained], dim="lam")
         
         # Concatenate with the existing W_all
         if W_all is None:
@@ -448,7 +511,7 @@ def get_var_ratio_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
         else:
             W_all = xr.concat([W_all, W], dim="lam")
         
-    return var_ratio_xr, W_all
+    return var_explained_xr, W_all
 
 
 ##########################
@@ -478,56 +541,53 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         Lambda values
     W_cv : xr.DataArray
         Weights
-    var_ratio_train_cv : xr.DataArray
+    var_explained_train_cv : xr.DataArray
         Variance ratio for training
-    var_ratio_test_cv : xr.DataArray
+    var_explained_test_cv : xr.DataArray
         Variance ratio for testing
     vr_test_train_ratio_cv : xr.DataArray
         Ratio of variance ratio for testing and training
-    var_ratio_test_masked_cv : xr.DataArray
-        Variance ratio for testing with support mask
     '''
     for test_fold_ind in range(fit_params['cv_fold']):
         # get test and train fold inds for one cross-validation set
-        train_frames, test_frames, nested_fold_inds = get_train_test_inds(test_fold_ind, fit_params, stratified_frames, cv_inds_stratified)
+        train_frames, test_frames, nested_fold_inds = \
+            get_train_test_inds(test_fold_ind, fit_params, stratified_frames, cv_inds_stratified)
         
         X_train_outer = X_trim[train_frames, :]
         X_test_outer = X_trim[test_frames, :]
         y_train_outer = response_trim[train_frames, :]
         y_test_outer = response_trim[test_frames, :]
         
-        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, \
-            vr_test_train_ratio_fold, var_ratio_test_masked_fold = \
-                collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer, nested_fold_inds,
+        lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, \
+            vr_test_train_ratio_fold = \
+                collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer,
+                                     y_train_outer, y_test_outer, nested_fold_inds,
                                     parallel=parallel, num_cores=num_cores)
         
         lambdas_fold = lambdas_fold.expand_dims(test_fold_ind=[test_fold_ind])
         W_fold = W_fold.expand_dims(test_fold_ind=[test_fold_ind])
-        var_ratio_train_fold = var_ratio_train_fold.expand_dims(test_fold_ind=[test_fold_ind])
-        var_ratio_test_fold = var_ratio_test_fold.expand_dims(test_fold_ind=[test_fold_ind])
+        var_explained_train_fold = var_explained_train_fold.expand_dims(test_fold_ind=[test_fold_ind])
+        var_explained_test_fold = var_explained_test_fold.expand_dims(test_fold_ind=[test_fold_ind])
         vr_test_train_ratio_fold = vr_test_train_ratio_fold.expand_dims(test_fold_ind=[test_fold_ind])
-        var_ratio_test_masked_fold = var_ratio_test_masked_fold.expand_dims(test_fold_ind=[test_fold_ind])
         
         if test_fold_ind == 0:
             lambdas_cv = lambdas_fold
             W_cv = W_fold
-            var_ratio_train_cv = var_ratio_train_fold
-            var_ratio_test_cv = var_ratio_test_fold
+            var_explained_train_cv = var_explained_train_fold
+            var_explained_test_cv = var_explained_test_fold
             vr_test_train_ratio_cv = vr_test_train_ratio_fold
-            var_ratio_test_masked_cv = var_ratio_test_masked_fold
+
         else:
             lambdas_cv = xr.concat([lambdas_cv, lambdas_fold], dim='test_fold_ind')
             W_cv = xr.concat([W_cv, W_fold], dim='test_fold_ind')
-            var_ratio_train_cv = xr.concat([var_ratio_train_cv, var_ratio_train_fold], dim='test_fold_ind')
-            var_ratio_test_cv = xr.concat([var_ratio_test_cv, var_ratio_test_fold], dim='test_fold_ind')
+            var_explained_train_cv = xr.concat([var_explained_train_cv, var_explained_train_fold], dim='test_fold_ind')
+            var_explained_test_cv = xr.concat([var_explained_test_cv, var_explained_test_fold], dim='test_fold_ind')
             vr_test_train_ratio_cv = xr.concat([vr_test_train_ratio_cv, vr_test_train_ratio_fold], dim='test_fold_ind')
-            var_ratio_test_masked_cv = xr.concat([var_ratio_test_masked_cv, var_ratio_test_masked_fold], dim='test_fold_ind')
-    
+                
     # Validation
     check_nan_weights(W_cv, run_params)
     
-    return lambdas_cv, W_cv, var_ratio_train_cv, var_ratio_test_cv, vr_test_train_ratio_cv, var_ratio_test_masked_cv
-    
+    return lambdas_cv, W_cv, var_explained_train_cv, var_explained_test_cv, vr_test_train_ratio_cv  
     
 
 def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
@@ -562,20 +622,18 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
         Lambda values
     W_fold : xr.DataArray
         Weights
-    var_ratio_train_fold : xr.DataArray
+    var_explained_train_fold : xr.DataArray
         Variance ratio for training
-    var_ratio_test_fold : xr.DataArray
+    var_explained_test_fold : xr.DataArray
         Variance ratio for testing
     vr_test_train_ratio_fold : xr.DataArray
         Ratio of variance ratio for testing and training
-    var_ratio_masked_fold : xr.DataArray
-        Variance ratio for testing with support mask
     '''
         
     models = run_params['dropouts'].keys()
     if parallel:
-        lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, \
-            vr_test_train_ratio_fold, var_ratio_test_masked_fold = \
+        lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, \
+            vr_test_train_ratio_fold = \
                 collect_fold_results_dask(run_params, fit_params, 
                                         X_train_outer, X_test_outer,
                                         y_train_outer, y_test_outer,
@@ -586,26 +644,24 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
                                                   X_train_outer, X_test_outer,
                                                   y_train_outer, y_test_outer,
                                                   nested_fold_inds, model_label)
-            (lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio,
-             var_ratio_test_masked) = model_results
+            (lambdas, W_model, var_explained_train, var_explained_test,
+             vr_test_train_ratio) = model_results
             
             # Collect results
             if mi == 0:
                 lambdas_fold = lambdas
                 W_fold = W_model
-                var_ratio_train_fold = var_ratio_train
-                var_ratio_test_fold = var_ratio_test
+                var_explained_train_fold = var_explained_train
+                var_explained_test_fold = var_explained_test
                 vr_test_train_ratio_fold = vr_test_train_ratio
-                var_ratio_test_masked_fold = var_ratio_test_masked
             else:
                 lambdas_fold = xr.concat([lambdas_fold, lambdas], dim='model')
                 W_fold = xr.concat([W_fold, W_model], dim='model')
-                var_ratio_train_fold = xr.concat([var_ratio_train_fold, var_ratio_train], dim='model')
-                var_ratio_test_fold = xr.concat([var_ratio_test_fold, var_ratio_test], dim='model')
+                var_explained_train_fold = xr.concat([var_explained_train_fold, var_explained_train], dim='model')
+                var_explained_test_fold = xr.concat([var_explained_test_fold, var_explained_test], dim='model')
                 vr_test_train_ratio_fold = xr.concat([vr_test_train_ratio_fold, vr_test_train_ratio], dim='model')
-                var_ratio_test_masked_fold = xr.concat([var_ratio_test_masked_fold, var_ratio_test_masked], dim='model')
             
-    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold, var_ratio_test_masked_fold
+    return lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, vr_test_train_ratio_fold
 
 
 def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
@@ -638,14 +694,12 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
         Lambda values
     W_fold : xr.DataArray
         Weights
-    var_ratio_train_fold : xr.DataArray
+    var_explained_train_fold : xr.DataArray
         Variance ratio from training
-    var_ratio_test_fold : xr.DataArray
+    var_explained_test_fold : xr.DataArray
         Variance ratio from testing
     vr_test_train_ratio_fold : xr.DataArray
          Ratio of variance ratio between testing and training (for overfitting check)
-    var_ratio_test_masked_fold : xr.DataArray
-        Variance ratio from testing with support mask 
     '''
     with Client() as client:
         tasks = []
@@ -663,24 +717,23 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
         
     # Collect results
     for mi in range(len(models)):
-        (lambdas, W_model, var_ratio_train, var_ratio_test, 
-         vr_test_train_ratio, var_ratio_test_masked) = model_results[mi]
+        (lambdas, W_model, var_explained_train, var_explained_test, 
+         vr_test_train_ratio) = model_results[mi]
         if mi == 0:
             lambdas_fold = lambdas
             W_fold = W_model
-            var_ratio_train_fold = var_ratio_train
-            var_ratio_test_fold = var_ratio_test
+            var_explained_train_fold = var_explained_train
+            var_explained_test_fold = var_explained_test
             vr_test_train_ratio_fold = vr_test_train_ratio
-            var_ratio_test_masked_fold = var_ratio_test_masked
+
         else:
             lambdas_fold = xr.concat([lambdas_fold, lambdas], dim='model')
             W_fold = xr.concat([W_fold, W_model], dim='model')
-            var_ratio_train_fold = xr.concat([var_ratio_train_fold, var_ratio_train], dim='model')
-            var_ratio_test_fold = xr.concat([var_ratio_test_fold, var_ratio_test], dim='model')
+            var_explained_train_fold = xr.concat([var_explained_train_fold, var_explained_train], dim='model')
+            var_explained_test_fold = xr.concat([var_explained_test_fold, var_explained_test], dim='model')
             vr_test_train_ratio_fold = xr.concat([vr_test_train_ratio_fold, vr_test_train_ratio], dim='model')
-            var_ratio_test_masked_fold = xr.concat([var_ratio_test_masked_fold, var_ratio_test_masked], dim='model')
             
-    return lambdas_fold, W_fold, var_ratio_train_fold, var_ratio_test_fold, vr_test_train_ratio_fold, var_ratio_test_masked_fold
+    return lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, vr_test_train_ratio_fold
 
 
 def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
@@ -712,14 +765,12 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
         Lambda values
     W_model : xr.DataArray
         Weights
-    var_ratio_train : xr.DataArray
+    var_explained_train : xr.DataArray
         Variance ratio from training
-    var_ratio_test : xr.DataArray
+    var_explained_test : xr.DataArray
         Variance ratio from testing
     vr_test_train_ratio : xr.DataArray
         Ratio of variance ratio between testing and training (for overfitting check)
-    var_ratio_test_masked : xr.DataArray
-        Variance ratio from testing with support mask
     '''
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
     test_lams = xr.DataArray(test_lams, dims={'lam'})
@@ -727,9 +778,10 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     weights = [w for w in X_train_outer.weights.values if np.any([(k in w) for k in kernels])]
     X_train_outer_model = X_train_outer.sel(weights=weights)
     x_test_outer_model = X_test_outer.sel(weights=weights)
-    var_ratio_xr_collected = collect_var_ratio_across_lambdas_and_nested_folds(X_train_outer_model, y_train_outer, nested_fold_inds, fit_params)
+    var_explained_xr_collected = collect_var_explained_across_lambdas_and_nested_folds(X_train_outer_model,
+                                                                                       y_train_outer, nested_fold_inds, fit_params)
     
-    best_lam_inds = var_ratio_xr_collected.mean(dim="nested_fold_ind").argmax(dim="lam")
+    best_lam_inds = var_explained_xr_collected.mean(dim="nested_fold_ind").argmax(dim="lam")
     lambdas = test_lams[best_lam_inds]
     
     # Train using the lambda
@@ -744,20 +796,18 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
             W_model = xr.concat([W_model, W_cell], dim="cell_roi_id")
             
     # Calculate performance on train and test sets
-    var_ratio_train, _ = variance_ratio(y_train_outer, W_model, X_train_outer_model)
-    var_ratio_test, var_ratio_test_masked = \
-        variance_ratio(y_test_outer, W_model, x_test_outer_model)
-    vr_test_train_ratio = var_ratio_test / var_ratio_train
+    var_explained_train = compute_variance_explained(y_train_outer, W_model, X_train_outer_model)
+    var_explained_test = compute_variance_explained(y_test_outer, W_model, x_test_outer_model)
+    ve_test_train_ratio = var_explained_test / var_explained_train
     
     # Expand model dimension of the DataArrays
     lambdas = lambdas.expand_dims(model=[model_label])
     W_model = W_model.expand_dims(model=[model_label])
-    var_ratio_train = var_ratio_train.expand_dims(model=[model_label])
-    var_ratio_test = var_ratio_test.expand_dims(model=[model_label])
-    vr_test_train_ratio = vr_test_train_ratio.expand_dims(model=[model_label])
-    var_ratio_test_masked = var_ratio_test_masked.expand_dims(model=[model_label])
+    var_explained_train = var_explained_train.expand_dims(model=[model_label])
+    var_explained_test = var_explained_test.expand_dims(model=[model_label])
+    vr_test_train_ratio = ve_test_train_ratio.expand_dims(model=[model_label])
     
-    return lambdas, W_model, var_ratio_train, var_ratio_test, vr_test_train_ratio, var_ratio_test_masked
+    return lambdas, W_model, var_explained_train, var_explained_test, vr_test_train_ratio
 
 
 ############
@@ -852,8 +902,8 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
     return session_model_from_splits, session_model_from_mean_W
 
 
-def get_full_session_var_ratio_from_mean_model(W_cv, X_trim, response_trim):
-    ''' Get full session variance ratio from mean model.
+def get_full_session_var_explained_from_mean_model(W_cv, X_trim, response_trim):
+    ''' Get full session variance explained from mean model.
     
     Parameters
     ----------
@@ -866,36 +916,33 @@ def get_full_session_var_ratio_from_mean_model(W_cv, X_trim, response_trim):
         
     Returns
     -------
-    var_ratio_mean_model : xr.DataArray
-        Variance ratio from the mean model
+    var_explained_mean_model : xr.DataArray
+        Variance explained from the mean model
     '''
-    # mean model and variance ratio
+    # mean model and variance explained
     W_mean = W_cv.mean(dim='test_fold_ind') #TODO: check if nanmean is necessary
     for mi, model in enumerate(W_mean.model.values):
         W_model = W_mean.sel(model=model)
         weights = W_model.dropna(dim='weights').weights.values
         X_model = X_trim.sel(weights=weights)
         W_mean_model = W_model.sel(weights=weights)
-        var_ratio, var_ratio_masked = variance_ratio(response_trim, W_mean_model, X_model)
-        var_ratio = var_ratio.expand_dims(model=[model])
-        var_ratio_masked = var_ratio_masked.expand_dims(model=[model])
+        var_explained = compute_variance_explained(response_trim, W_mean_model, X_model)
+        var_explained = var_explained.expand_dims(model=[model])
         if mi == 0:
-            var_ratio_mean_model = var_ratio
-            var_ratio_masked_mean_model = var_ratio_masked
+            var_explained_mean_model = var_explained
         else:
-            var_ratio_mean_model = xr.concat([var_ratio_mean_model, var_ratio], dim='model')
-            var_ratio_masked_mean_model = xr.concat([var_ratio_masked_mean_model, var_ratio_masked], dim='model')
-    return var_ratio_mean_model, var_ratio_masked_mean_model
+            var_explained_mean_model = xr.concat([var_explained_mean_model, var_explained], dim='model')
+    return var_explained_mean_model
 
 
 ############################################################################################
 # Saving and loading the results
-def save_glm_restuls(dm_version, session_name, data_type,
+def save_glm_results(dm_version, session_name, data_type,
                      fit_params, use_indices, stratified_frames, cv_inds_stratified,
                      lambdas_cv, W_cv, 
-                     var_ratio_train_cv, var_ratio_test_cv, 
-                     vr_test_train_ratio_cv, var_ratio_test_masked_cv,
-                     var_ratio_mean_model, var_ratio_masked_mean_model,
+                     var_explained_train_cv, var_explained_test_cv, 
+                     vr_test_train_ratio_cv,
+                     var_explained_mean_model,
                      save_dir):
     glm_results = {'fit_params': fit_params,
                 'use_indices': use_indices,
@@ -903,12 +950,11 @@ def save_glm_restuls(dm_version, session_name, data_type,
                 'cv_inds_stratified': cv_inds_stratified,
                 'lambdas_cv': lambdas_cv,
                 'W_cv': W_cv,
-                'var_ratio_train_cv': var_ratio_train_cv,
-                'var_ratio_test_cv': var_ratio_test_cv,
+                'var_explained_train_cv': var_explained_train_cv,
+                'var_explained_test_cv': var_explained_test_cv,
                 'vr_test_train_ratio_cv': vr_test_train_ratio_cv,
-                'var_ratio_test_masked_cv': var_ratio_test_masked_cv,
-                'var_ratio_mean_model': var_ratio_mean_model,
-                'var_ratio_masked_mean_model': var_ratio_masked_mean_model}
+                'var_explained_mean_model': var_explained_mean_model,
+                }
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     save_fn = save_dir / f'glm_results_v{dm_version:02}_{session_name}_{data_type}.npy'
