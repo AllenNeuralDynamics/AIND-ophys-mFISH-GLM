@@ -37,7 +37,8 @@ RUN pip install -U --no-cache-dir \
     aind-session \
     tables \
     umap-learn \
-    pyarrow
+    pyarrow \
+    plotly
 
 
 RUN git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \

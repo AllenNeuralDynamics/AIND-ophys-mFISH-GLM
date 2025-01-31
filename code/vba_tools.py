@@ -1414,13 +1414,12 @@ def plot_feature_matrix_sorted(feature_matrix, cluster_meta, sort_col='cluster_i
         utils.save_figure(fig, figsize, save_dir, folder, 'feature_matrix_sorted_by_' + sort_col + suffix)
         
         
-def plot_flashes_on_trace(ax, timestamps, change=None, omitted=False, alpha=0.075, facecolor='gray'):
+def plot_flashes_on_trace(ax, timestamps, change_time=0, change=None, omitted=False, alpha=0.075, facecolor='gray'):
     """
     plot stimulus flash durations on the given axis according to the provided timestamps
     """
     stim_duration = 0.2502
     blank_duration = 0.5004
-    change_time = 0
     start_time = timestamps[0]
     end_time = timestamps[-1]
     interval = (blank_duration + stim_duration)
@@ -1441,10 +1440,10 @@ def plot_flashes_on_trace(ax, timestamps, change=None, omitted=False, alpha=0.07
             ax.axvspan(amin, amax, facecolor=facecolor, edgecolor='none', alpha=alpha, linewidth=0, zorder=1)
     # if change == True:
     #     alpha = alpha / 2.
-    else:
-        alpha
+    # else:
+    #     alpha
     # before time 0
-    array = np.arange(change_time, start_time - interval, -interval)
+    array = np.arange(change_time, start_time, -interval)
     array = array[1:]
     for i, vals in enumerate(array):
         amin = array[i]
