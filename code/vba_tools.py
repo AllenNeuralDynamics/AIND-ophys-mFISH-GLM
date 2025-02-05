@@ -154,6 +154,7 @@ def plot_gap_statistic(gap_statistic, n_clusters=None, tag='', save_dir=None, fo
     plt.subplots_adjust(wspace=0.4)
     if save_dir:
         utils.save_figure(fig, figsize, save_dir, folder, 'Gap_' + suffix)
+    return ax
 
 
 def plot_gap_statistic_with_sem(gap_statistics, n_clusters=None, tag='', save_dir=None, folder=None):
@@ -216,6 +217,7 @@ def plot_eigengap_values(eigenvalues, n_clusters=None, save_dir=None, folder=Non
     plt.subplots_adjust(wspace=0.4)
     if save_dir:
         utils.save_figure(fig, figsize, save_dir, folder, 'eigengap' + suffix)
+    return ax
 
 
 def plot_silhouette_scores(X=None, model=KMeans, silhouette_scores=None, silhouette_std=None,
@@ -1291,16 +1293,16 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
 def get_experience_level_colors():
     """
     get color map corresponding to Familiar, Novel 1 and Novel >1
-    Familiar = red
-    Novel 1 = blue
-    Novel >1 = lighter blue
+    Familiar = blue
+    Novel = red
+    Novel+1 = purple
     """
-
-    reds = sns.color_palette('Reds_r', 6)[:5][::2]
+    
     blues = sns.color_palette('Blues_r', 6)[:5][::2]
+    reds = sns.color_palette('Reds_r', 6)[:5][::2]
     purples = sns.color_palette('Purples_r', 6)[:5][::2]
 
-    colors = [reds[0], blues[0], purples[0]]
+    colors = [blues[0], reds[0], purples[0]]
 
     return colors
 
