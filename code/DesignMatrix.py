@@ -65,10 +65,10 @@ class DesignMatrix(object):
         param_labels = []
         for kernel_name in kernels:
             kernels_to_use.append(self.kernel_dict[kernel_name]['kernel'])
-            param_labels.append(self.make_labels(   kernel_name, 
-                                                    np.shape(self.kernel_dict[kernel_name]['kernel'])[0], 
-                                                    self.kernel_dict[kernel_name]['offset_samples'],
-                                                    self.kernel_dict[kernel_name]['kernel_length_samples'] ))
+            param_labels.append(self.make_labels(kernel_name, 
+                                                 np.shape(self.kernel_dict[kernel_name]['kernel'])[0], 
+                                                 self.kernel_dict[kernel_name]['offset_samples'],
+                                                 self.kernel_dict[kernel_name]['kernel_length_samples'] ))
 
         X = np.vstack(kernels_to_use) 
         x_labels = np.hstack(param_labels)

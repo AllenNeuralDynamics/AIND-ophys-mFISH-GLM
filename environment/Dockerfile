@@ -24,6 +24,7 @@ RUN pip install -U --no-cache-dir \
     pillow \
     pandas \
     pyyaml \
+    ray \
     dask \
     distributed \
     aind-codeocean-utils \
@@ -38,36 +39,34 @@ RUN pip install -U --no-cache-dir \
     tables \
     umap-learn \
     pyarrow \
-    plotly
+    plotly \
+    ipywidgets
 
 
-RUN git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \
+RUN cd / \
+    && git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \
     && cd aind-codeocean-api \
     && pip install -e .
 
-RUN git clone https://github.com/AllenNeuralDynamics/aind-ophys-data-access \
+RUN cd / \
+    && git clone https://github.com/AllenNeuralDynamics/aind-ophys-data-access \
     && cd aind-ophys-data-access \
     && pip install -e .
 
-RUN git clone https://github.com/AllenNeuralDynamics/brain_observatory_utilities_ophys \
+RUN cd / \
+    && git clone https://github.com/AllenNeuralDynamics/brain_observatory_utilities_ophys \
     && cd brain_observatory_utilities_ophys \
     && pip install -e .
 
-RUN git clone https://github.com/AllenNeuralDynamics/comb \
+RUN cd / \
+    && git clone https://github.com/AllenNeuralDynamics/comb \
     && cd comb \
     && pip install -e .
 
-RUN git clone https://github.com/AllenNeuralDynamics/lamf-analysis \
+RUN cd / \
+    && git clone https://github.com/AllenNeuralDynamics/lamf-analysis \
     && cd lamf-analysis \
     && pip install -e .    
-
-# install versions for github copilot
-ADD "https://github.com/coder/code-server/releases/download/v4.21.1/code-server-4.21.1-linux-amd64.tar.gz" /.code-server/code-server.tar.gz
-
-RUN cd /.code-server \
-    && tar -xvf code-server.tar.gz \
-    && rm code-server.tar.gz \
-    && ln -s /.code-server/code-server-4.21.1-linux-amd64/bin/code-server  /usr/bin/code-server
 
 COPY postInstall /
 RUN /postInstall

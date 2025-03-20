@@ -158,26 +158,28 @@ def extract_and_annotate_ophys_plane(bod, run_params, TESTING=False):
         sets up the timestamps to be used
         sets up bins for binning times onto the ophys timestamps
     '''
-    response = dict()
-    response['response_arr'] = process_data(bod, run_params, TESTING=TESTING)
-    response['timestamps'] = [float(round(ts, 4)) for ts in response['response_arr']['timestamps'].values]
-    step = np.mean(np.diff(response['timestamps']))
+    activity_trace = dict()
+    activity_trace['activity_trace_arr'] = process_data(bod, run_params, TESTING=TESTING)
+    activity_trace['timestamps'] = [float(round(ts, 4)) for ts in \
+                                    activity_trace['activity_trace_arr']['timestamps'].values]
+    step = np.mean(np.diff(activity_trace['timestamps']))
     step = float(round(step, 4))
-    response['time_bins'] = np.concatenate([response['timestamps'],[response['timestamps'][-1]+step]])-step*.5  
+    activity_trace['time_bins'] = np.concatenate([activity_trace['timestamps'],
+                                                 [activity_trace['timestamps'][-1]+step]])-step*.5  
     # TODO: better to use previous frame end time and current frame end time. But for now just leave it as-is, 
     # because it's very minor and used for lick counts only.
     ophys_frame_rate = bod.ophys_plane_dataset.metadata['ophys_frame_rate']
-    response['ophys_frame_rate'] = float(round(ophys_frame_rate, 3))
+    activity_trace['ophys_frame_rate'] = float(round(ophys_frame_rate, 3))
     
     # Interpolate onto stimulus 
-    response, run_params = interpolate_to_stimulus(response, bod, run_params)
+    activity_trace, run_params = interpolate_to_stimulus(activity_trace, bod, run_params)
 
     # TODO: consider splitting on engagement (or using it as a feature)
-    return response, run_params
+    return activity_trace, run_params
 
 
-def process_data(bod, response_params, TESTING=False):
-    """ Processes dff traces by trimming off portions of recording session outside of the task period. These include:
+def process_data(bod, activity_trace_params, TESTING=False):
+    """ Processes activity traces by trimming off portions of recording session outside of the task period. These include:
         * a ~5 minute gray screen period before the task begins
         * a ~5 minute gray screen period after the task ends
         * a 5-10 minute movie following the second gray screen period
@@ -186,8 +188,8 @@ def process_data(bod, response_params, TESTING=False):
     ----------
     bod : behaviorOphysPlaneDataset object
         COMB object containing the ophys plane data
-    response_params : dict
-        dictionary containing the response parameters
+    activity_trace_params : dict
+        dictionary containing the activity_trace parameters
     TESTING : bool, optional
         if True, only includes the first 6 cells of the experiment, by default False
 
@@ -200,27 +202,27 @@ def process_data(bod, response_params, TESTING=False):
     # clip off the grey screen periods
     timestamps_to_use = get_ophys_frames_to_use(bod)  # boolean mask
 
-    if response_params['data_type'] == 'events':
+    if activity_trace_params['data_type'] == 'events':
         print('Using events traces')
-        response_arr = get_events_xr(bod, timestamps_to_use, filtered=False)
-    elif response_params['data_type'] == 'filtered_events':
+        activity_trace_arr = get_events_xr(bod, timestamps_to_use, filtered=False)
+    elif activity_trace_params['data_type'] == 'filtered_events':
         print('Using filtered events traces')
-        response_arr = get_events_xr(bod, timestamps_to_use, filtered=True)
-    elif response_params['data_type'] == 'dff':
+        activity_trace_arr = get_events_xr(bod, timestamps_to_use, filtered=True)
+    elif activity_trace_params['data_type'] == 'dff':
         print('Using dff traces')
-        response_arr = get_dff_xr(bod, timestamps_to_use)
+        activity_trace_arr = get_dff_xr(bod, timestamps_to_use)
     else:
         raise ValueError('Invalid data_type. Must be one of ["events", "filtered_events", "dff"]')
 
     # some assert statements to ensure that dimensions are correct
-    assert np.sum(timestamps_to_use) == len(response_arr['timestamps'].values), 'length of `timestamps_to_use` must match length of `timestamps` in `response_trace_xr`'
-    assert np.sum(timestamps_to_use) == response_arr.values.shape[0], 'length of `timestamps_to_use` must match 0th dimension of `response_trace_xr`'
+    assert np.sum(timestamps_to_use) == len(activity_trace_arr['timestamps'].values), 'length of `timestamps_to_use` must match length of `timestamps` in `activity_trace_arr`'
+    assert np.sum(timestamps_to_use) == activity_trace_arr.values.shape[0], 'length of `timestamps_to_use` must match 0th dimension of `activity_trace_arr`'
     
     # Clip the array to just the first 6 cells
     if TESTING:
-        response_arr = response_arr[:,0:6]
+        activity_trace_arr = activity_trace_arr[:,0:6]
            
-    return response_arr
+    return activity_trace_arr
 
 
 def get_ophys_frames_to_use(bod, end_buffer=0.5, stim_dur=0.25):
@@ -326,7 +328,7 @@ def get_dff_xr(bod, timestamps_to_use):
     return dff_trace_xr
 
 
-def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
+def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0.75):
     '''
         This function interpolates the neural signal (either dff or events) onto timestamps that are aligned to the stimulus.
         
@@ -336,7 +338,7 @@ def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
     '''
     # if ('interpolate_to_stimulus' not in run_params) or (not run_params['interpolate_to_stimulus']):
     #     print('Not interpolating onto stimulus aligned timestamps')
-    #     return response, run_params
+    #     return activity_trace, run_params
     # TODO: Is there a reason to not interpolate to stimulus aligned timestamps? 
     print('Interpolating neural signal onto stimulus aligned timestamps')
  
@@ -348,7 +350,7 @@ def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
     # Make new timestamps by starting with each stimulus start time, and adding time points until we hit the next stimulus
     start_times = filtered_stimulus_presentations.start_time.values
     start_times = np.concatenate([start_times, [start_times[-1] + stimulus_interval]]) 
-    mean_step = np.mean(np.diff(response['timestamps']))  #TODO: consider using ophys frame rate
+    mean_step = np.mean(np.diff(activity_trace['timestamps']))  #TODO: consider using ophys frame rate
     mean_step = float(round(mean_step, 4))
     # mean_step = 1 / bod.ophys_plane_dataset.metadata['ophys_frame_rate']
     sets_of_stimulus_timestamps = []
@@ -363,19 +365,20 @@ def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
     new_bins = np.concatenate([new_timestamps, [new_timestamps[-1] + mean_step]]) - mean_step / 2
 
     # Check if it was already interpolated
-    if np.array_equal(new_timestamps, response['timestamps']):
+    if np.array_equal(new_timestamps, activity_trace['timestamps']):
         print('Already interpolated onto stimulus aligned timestamps')
         return fit, run_params
     else:
         # Setup new variables 
-        num_cells = np.size(response['response_arr'], 1)
+        num_cells = np.size(activity_trace['activity_trace_arr'], 1)
         new_trace_arr = np.empty((len(new_timestamps), num_cells))
         new_trace_arr[:] = 0
         
         # Interpolate onto new timestamps
         for index in range(0,num_cells):
             # Fit array
-            f = scipy.interpolate.interp1d(response['timestamps'], response['response_arr'][:,index],
+            f = scipy.interpolate.interp1d(activity_trace['timestamps'],
+                                           activity_trace['activity_trace_arr'][:,index],
                                            bounds_error=False, fill_value='extrapolate')
             new_trace_arr[:,index] = f(new_timestamps)
 
@@ -385,21 +388,21 @@ def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
             dims = ('timestamps','cell_roi_id'), 
             coords = {
                 'timestamps': new_timestamps,
-                'cell_roi_id': response['response_arr']['cell_roi_id'].values
+                'cell_roi_id': activity_trace['activity_trace_arr']['cell_roi_id'].values
             }
         )
 
         # Save everything
-        response['stimulus_interpolation'] = {
+        activity_trace['stimulus_interpolation'] = {
             'mean_step': mean_step,
             'timesteps_per_stimulus': mode,
-            'original_response_arr': response['response_arr'],
-            'original_timestamps': response['timestamps'],
-            'original_bins':response['time_bins']
+            'original_activity_trace_arr': activity_trace['activity_trace_arr'],
+            'original_timestamps': activity_trace['timestamps'],
+            'original_bins': activity_trace['time_bins']
         }
-        response['response_arr'] = new_trace_arr
-        response['timestamps'] = new_timestamps
-        response['time_bins'] = new_bins
+        activity_trace['activity_trace_arr'] = new_trace_arr
+        activity_trace['timestamps'] = new_timestamps
+        activity_trace['time_bins'] = new_bins
     
         # Use the number of timesteps per stimulus to define the image kernel length so we get no overlap 
         # kernels_to_limit_per_image_cycle = ['image0','image1','image2','image3','image4','image5','image6','image7']
@@ -412,12 +415,12 @@ def interpolate_to_stimulus(response, bod, run_params, stimulus_interval=0.75):
             kernels_to_limit_per_image_cycle.append('passive_change')
         for k in kernels_to_limit_per_image_cycle:
             if k in run_params['kernels']:
-                run_params['kernels'][k]['num_weights'] = response['stimulus_interpolation']['timesteps_per_stimulus']    
+                run_params['kernels'][k]['num_weights'] = activity_trace['stimulus_interpolation']['timesteps_per_stimulus']    
 
         # Check to make sure there are no NaNs in the fit_trace
-        assert np.isnan(response['response_arr']).sum() == 0, "Have NaNs in response_arr"
+        assert np.isnan(activity_trace['activity_trace_arr']).sum() == 0, "Have NaNs in activity_trace_arr"
 
-    return response, run_params
+    return activity_trace, run_params
 
 
 def check_same_number_per_stimulus(sets_of_stimulus_timestamps, run_params):

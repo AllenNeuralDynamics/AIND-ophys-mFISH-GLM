@@ -3,55 +3,54 @@ import numpy as np
 import xarray as xr
 import json
 from glob import glob
-from dask import delayed, compute
-from dask.distributed import Client
-
+# from dask import delayed, compute
+# from dask.distributed import Client
+import ray
 
 ##############################################################################################################
 ## Loading and trimming data
-def load_data(session_name, data_type, dm_version, load_path='/root/capsule/data'):
+def load_data(session_key, data_type, version, load_path):
     if type(load_path) == str:
         load_path = Path(load_path)
     
-    dm_path = load_path / f'design_matrix_{session_name}_v{dm_version:02}'
-    rm_path = load_path / f'response_matrix_{session_name}_{data_type}'
-
-    x_fn = dm_path / 'design_matrix.nc'
+    data_path = load_path / f'{session_key}_glm_v{version:02}'
+    
+    x_fn = data_path / 'design_matrix.nc'
 
     X = xr.open_dataarray(x_fn, mmap=False)
 
-    run_params_fn = dm_path / 'run_params.json'
+    run_params_fn = data_path / 'run_params.json'
     with open(run_params_fn, 'r') as f:
         run_params = json.load(f)
 
-    unstd_features_fn = dm_path / 'unstd_features.npy'
+    unstd_features_fn = data_path / 'unstd_features.npy'
     unstd_features = np.load(unstd_features_fn, allow_pickle=True).item()
 
-    response_fn = rm_path / 'response_matrix.nc'
-    response = xr.open_dataarray(response_fn, mmap=False)
+    activity_trace_fn = data_path / f'{data_type}_activity_trace_matrix.nc'
+    activity_trace = xr.open_dataarray(activity_trace_fn, mmap=False)
 
-    assert X.shape[0] == response.shape[0]
+    assert X.shape[0] == activity_trace.shape[0]
 
-    response_info_fn = rm_path / 'response_info.npy'
-    response_info = np.load(response_info_fn, allow_pickle=True).item()
-    # ophys_frame_rate = response_info['ophys_frame_rate']
+    activity_trace_info_fn = data_path / f'{data_type}_activity_trace_info.npy'
+    activity_trace_info = np.load(activity_trace_info_fn, allow_pickle=True).item()
+    # ophys_frame_rate = activity_trace_info['ophys_frame_rate']
     
     # Trim frames based on kernel offsets
-    offsets = [int(w.split('_')[1]) for w in X.weights.values]
+    offsets = [int(w.split('_')[-1]) for w in X.weights.values]
     min_offset = min(min(offsets), 0)
     max_offset = max(max(offsets), 0)
     use_indices = range(max_offset, X.shape[0] + min_offset)  # min_offset is negative or 0
     
-    return X, response, response_info, run_params, unstd_features, use_indices 
+    return X, activity_trace, activity_trace_info, run_params, unstd_features, use_indices 
 
 
-def get_prop_support(response_trim):
+def get_prop_support(activity_trace_trim):
     ''' Get proportion of support for each cell.
     
     Parameters
     ----------
-    response_trim : xr.DataArray
-        Trimmed response matrix (time x cell_roi_id)
+    activity_trace_trim : xr.DataArray
+        Trimmed activity_trace matrix (time x cell_roi_id)
         
     Returns
     -------
@@ -59,34 +58,34 @@ def get_prop_support(response_trim):
         Proportion of support for each cell
     '''
     prop_support = []
-    for cri in response_trim.cell_roi_id.values:
-        trace = response_trim.sel(cell_roi_id=cri)
+    for cri in activity_trace_trim.cell_roi_id.values:
+        trace = activity_trace_trim.sel(cell_roi_id=cri)
         prop_support.append(len(np.where(trace)[0]) / len(trace))
     prop_support = np.array(prop_support)
     return prop_support
 
 
-def filter_response_matrix(response, prop_support_threshold=0.01):
+def filter_activity_trace_matrix(activity_trace, prop_support_threshold=0.01):
     '''Filter out cells based on proportion of event frames
     Particularly useful for events (may not needed for dff)
     
     Parameters
     ----------
-    response : xr.DataArray
-        Response matrix (time x cell_roi_id)
+    activity_trace : xr.DataArray
+        activity_trace matrix (time x cell_roi_id)
     prop_support_threshold : float, optional
         Threshold for proportion of event frames, by default 0.01
         
     Returns
     -------
-    response_filtered : xr.DataArray
-        Filtered response matrix (time x cell_roi_id)
+    activity_trace_filtered : xr.DataArray
+        Filtered activity_trace matrix (time x cell_roi_id)
         
     '''
-    prop_support = get_prop_support(response)
+    prop_support = get_prop_support(activity_trace)
     filtered_inds = np.where(prop_support >= prop_support_threshold)[0]
-    response_filtered = response.isel(cell_roi_id=filtered_inds)
-    return response_filtered
+    activity_trace_filtered = activity_trace.isel(cell_roi_id=filtered_inds)
+    return activity_trace_filtered
 
 
 ## Fitting parameters
@@ -199,14 +198,19 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
         elif var == 'rolling_performance':
             keyword = 'hits'
             correct = get_feature_traces_from_X(X, use_indices, keyword)
-            # rolling sum
-            num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
-            rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
-            # binarization
-            performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
-            nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
-            stratified = [performing_frames, nonperforming_frames]
-            stratified_list.append(stratified)
+            if correct is not None:
+                # TODO: it assumes that hits is in the input weights. Consider when it's not.
+                # Also consider the similar case for other stratification variables.
+                # rolling sum
+                num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
+                rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
+                # binarization
+                performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
+                nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
+                stratified = [performing_frames, nonperforming_frames]
+                stratified_list.append(stratified)
+            else:
+                stratified_list.append([[], []])
         elif var == 'lick':
             licks_trace = unstd_features['licks'][use_indices]
             assert len(licks_trace) == X_trim.shape[0]
@@ -412,8 +416,8 @@ def compute_adjusted_variance_explained(y, W, X, mask):
         mu = trace.mean(dim='timestamps')
         return ((trace[support_mask, :] - mu)**2).mean(dim='timestamps')
 
-    var_total = my_var(y, mask)#Total variance in the ophys trace for each cell
-    var_resid = my_var(y - y_hat, mask)#Residual variance in the difference between the model and data
+    var_total = my_var(y, mask) # Total variance in the ophys trace for each cell
+    var_resid = my_var(y - y_hat, mask) # Residual variance in the difference between the model and data
     return (var_total - var_resid) / var_total  # Fraction of variance explained by linear model
 
 
@@ -427,7 +431,7 @@ def collect_var_explained_across_lambdas_and_nested_folds(X, y, nested_fold_inds
     X : xr.DataArray
         Design matrix
     y : xr.DataArray
-        Response matrix
+        activity_trace matrix
     nested_fold_inds : list
         List of indices for nested cross-validation
     fit_params : dict
@@ -473,9 +477,9 @@ def get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_l
     X_test : xr.DataArray
         Design matrix for testing
     y_train : xr.DataArray
-        Response matrix for training
+        activity_trace matrix for training
     y_test : xr.DataArray
-        Response matrix for testing
+        activity_trace matrix for testing
     test_lams : list
         List of lambda values to run
         
@@ -516,7 +520,7 @@ def get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_l
 
 ##########################
 ## Running the whole session data
-def collect_session_results(run_params, fit_params, X_trim, response_trim, stratified_frames, cv_inds_stratified,
+def collect_session_results(run_params, fit_params, X_trim, activity_trace_trim, stratified_frames, cv_inds_stratified,
                             parallel=True, num_cores=None):
     ''' Collect session results, from collect_fold_results, using nested cross-validation for lambda selection and model fitting.
     
@@ -528,8 +532,8 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         Fitting parameters
     X_trim : xr.DataArray
         Trimmed design matrix
-    response_trim : xr.DataArray
-        Trimmed response matrix
+    activity_trace_trim : xr.DataArray
+        Trimmed activity_trace matrix
     stratified_frames : list
         List of stratified frames
     cv_inds_stratified : list
@@ -555,8 +559,8 @@ def collect_session_results(run_params, fit_params, X_trim, response_trim, strat
         
         X_train_outer = X_trim[train_frames, :]
         X_test_outer = X_trim[test_frames, :]
-        y_train_outer = response_trim[train_frames, :]
-        y_test_outer = response_trim[test_frames, :]
+        y_train_outer = activity_trace_trim[train_frames, :]
+        y_test_outer = activity_trace_trim[test_frames, :]
         
         lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, \
             vr_test_train_ratio_fold = \
@@ -605,9 +609,9 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
     X_test_outer : xr.DataArray
         Design matrix for testing
     y_train_outer : xr.DataArray
-        Response matrix for training
+        activity_trace matrix for training
     y_test_outer : xr.DataArray
-        Response matrix for testing
+        activity_trace matrix for testing
     nested_fold_inds : list
         List of indices for nested cross-validation
     parallel : bool (optional)
@@ -634,7 +638,7 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
     if parallel:
         lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, \
             vr_test_train_ratio_fold = \
-                collect_fold_results_dask(run_params, fit_params, 
+                collect_fold_results_parallel(run_params, fit_params, 
                                         X_train_outer, X_test_outer,
                                         y_train_outer, y_test_outer,
                                         nested_fold_inds, num_cores=num_cores)
@@ -664,7 +668,7 @@ def collect_fold_results(run_params, fit_params, X_train_outer, X_test_outer, y_
     return lambdas_fold, W_fold, var_explained_train_fold, var_explained_test_fold, vr_test_train_ratio_fold
 
 
-def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
+def collect_fold_results_parallel(run_params, fit_params, X_train_outer, X_test_outer, y_train_outer, y_test_outer,
                               nested_fold_inds, num_cores=None):
     ''' Collect fold results using dask.
     
@@ -679,9 +683,9 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
     X_test_outer : xr.DataArray
         Design matrix for testing
     y_train_outer : xr.DataArray
-        Response matrix for training
+        activity_trace matrix for training
     y_test_outer : xr.DataArray
-        Response matrix for testing
+        activity_trace matrix for testing
     nested_fold_inds : list
         List of indices for nested cross-validation
     num_cores : int (optional)
@@ -701,19 +705,28 @@ def collect_fold_results_dask(run_params, fit_params, X_train_outer, X_test_oute
     vr_test_train_ratio_fold : xr.DataArray
          Ratio of variance ratio between testing and training (for overfitting check)
     '''
-    with Client() as client:
-        tasks = []
-        models = run_params['dropouts'].keys()
-        for mi, model_label in enumerate(models):
-            task = delayed(collect_model_results)(run_params, fit_params,
-                                                  X_train_outer, X_test_outer,
-                                                  y_train_outer, y_test_outer,
-                                                  nested_fold_inds, model_label)
-            tasks.append(task)
-        if num_cores is None:
-            model_results = compute(*tasks)
-        else:
-            model_results = compute(*tasks, num_workers=num_cores)
+    # with Client() as client:
+    # tasks = []
+    futures = []
+    models = run_params['dropouts'].keys()
+    for mi, model_label in enumerate(models):
+        # task = delayed(collect_model_results)(run_params, fit_params,
+        #                                         X_train_outer, X_test_outer,
+        #                                         y_train_outer, y_test_outer,
+        #                                         nested_fold_inds, model_label)
+        # tasks.append(task)
+        futures.append(ray.remote(
+                collect_model_results).remote(
+                    run_params, fit_params,
+                    X_train_outer, X_test_outer,
+                    y_train_outer, y_test_outer,
+                    nested_fold_inds, model_label))
+
+    model_results = ray.get(futures)
+    # if num_cores is None:
+    #     model_results = compute(*tasks)
+    # else:
+    #     model_results = compute(*tasks, num_workers=num_cores)
         
     # Collect results
     for mi in range(len(models)):
@@ -751,9 +764,9 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     X_test_outer : xr.DataArray
         Design matrix for testing
     y_train_outer : xr.DataArray
-        Response matrix for training
+        activity_trace matrix for training
     y_test_outer : xr.DataArray
-        Response matrix for testing
+        activity_trace matrix for testing
     nested_fold_inds : list
         List of indices for nested cross-validation
     model_label : str
@@ -771,6 +784,7 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
         Variance ratio from testing
     vr_test_train_ratio : xr.DataArray
         Ratio of variance ratio between testing and training (for overfitting check)
+        Values close to 0 means overfitting. Values close to 1 is ideal.
     '''
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
     test_lams = xr.DataArray(test_lams, dims={'lam'})
@@ -834,7 +848,7 @@ def check_nan_weights(W, run_params):
 ############################################################################################
 # gathering session model traces
 # one from splits, another from the mean model
-def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, stratified_frames, cv_inds_stratified):
+def get_sessionwise_model_traces(fit_params, W_cv, X_trim, activity_trace_trim, stratified_frames, cv_inds_stratified):
     ''' Get sessionwise model traces - both from stitching each split fits and from mean coefficients across splits.
     These are too big so won't be saved in the results.
     Use this function to retrieve the sessionwise model traces.
@@ -848,8 +862,8 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
         Weights from cross-validation
     X_trim : xr.DataArray
         Trimmed design matrix
-    response_trim : xr.DataArray
-        Trimmed response matrix
+    activity_trace_trim : xr.DataArray
+        Trimmed activity_trace matrix
     stratified_frames : list
         List of stratified frames
     cv_inds_stratified : list
@@ -864,10 +878,10 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
     '''
     # getting session model from stitching each split fits
     models = W_cv.model.values
-    session_model_from_splits = xr.DataArray(np.zeros((*response_trim.shape, len(models))),
+    session_model_from_splits = xr.DataArray(np.zeros((*activity_trace_trim.shape, len(models))),
                                             dims=['timestamps', 'cell_roi_id', 'model'],
-                                            coords={'timestamps':response_trim.timestamps,
-                                                    'cell_roi_id':response_trim.cell_roi_id,
+                                            coords={'timestamps':activity_trace_trim.timestamps,
+                                                    'cell_roi_id':activity_trace_trim.cell_roi_id,
                                                     'model':models})
     for test_fold_ind in range(fit_params['cv_fold']):
         train_frames, test_frames, nested_fold_inds = \
@@ -875,7 +889,7 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
         test_frames = np.sort(test_frames)
 
         X_test_outer = X_trim[test_frames, :]
-        y_test_outer = response_trim[test_frames, :]
+        y_test_outer = activity_trace_trim[test_frames, :]
         
         W_fold = W_cv.sel(test_fold_ind=test_fold_ind)
         
@@ -902,7 +916,7 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, response_trim, strati
     return session_model_from_splits, session_model_from_mean_W
 
 
-def get_full_session_var_explained_from_mean_model(W_cv, X_trim, response_trim):
+def get_full_session_var_explained_from_mean_model(W_cv, X_trim, activity_trace_trim):
     ''' Get full session variance explained from mean model.
     
     Parameters
@@ -911,8 +925,8 @@ def get_full_session_var_explained_from_mean_model(W_cv, X_trim, response_trim):
         Weights from cross-validation
     X_trim : xr.DataArray
         Trimmed design matrix
-    response_trim : xr.DataArray
-        Trimmed response matrix
+    activity_trace_trim : xr.DataArray
+        Trimmed activity_trace matrix
         
     Returns
     -------
@@ -926,7 +940,7 @@ def get_full_session_var_explained_from_mean_model(W_cv, X_trim, response_trim):
         weights = W_model.dropna(dim='weights').weights.values
         X_model = X_trim.sel(weights=weights)
         W_mean_model = W_model.sel(weights=weights)
-        var_explained = compute_variance_explained(response_trim, W_mean_model, X_model)
+        var_explained = compute_variance_explained(activity_trace_trim, W_mean_model, X_model)
         var_explained = var_explained.expand_dims(model=[model])
         if mi == 0:
             var_explained_mean_model = var_explained
@@ -937,7 +951,7 @@ def get_full_session_var_explained_from_mean_model(W_cv, X_trim, response_trim):
 
 ############################################################################################
 # Saving and loading the results
-def save_glm_results(dm_version, session_name, data_type,
+def save_glm_results(dm_version, session_key, data_type,
                      fit_params, use_indices, stratified_frames, cv_inds_stratified,
                      lambdas_cv, W_cv, 
                      var_explained_train_cv, var_explained_test_cv, 
@@ -957,10 +971,10 @@ def save_glm_results(dm_version, session_name, data_type,
                 }
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    save_fn = save_dir / f'glm_results_v{dm_version:02}_{session_name}_{data_type}.npy'
+    save_fn = save_dir / f'glm_results_v{dm_version:02}_{session_key}_{data_type}.npy'
     if save_fn.exists():
         print(f'\n\n{save_fn} exists!\n\nAdding_suffix...')
-        fn_base = f'glm_results_v{dm_version:02}_{session_name}_{data_type}'
+        fn_base = f'glm_results_v{dm_version:02}_{session_key}_{data_type}'
         fn_list = [Path(fp).name for fp in glob(str(save_dir / fn_base) + '*')]
         suffixes = [fn.split(f'{fn_base}')[1].split('.')[0] for fn in fn_list]
         suffixes = [s.split('_')[1] for s in suffixes if len(s)>0]

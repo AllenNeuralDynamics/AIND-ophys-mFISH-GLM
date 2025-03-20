@@ -4,7 +4,7 @@ from sklearn.decomposition import PCA
 import scipy
 import pandas as pd
 
-def add_kernels(design, run_params, bod, response):
+def add_kernels(design, run_params, bod, activity_trace):
     '''
         Iterates through the kernels in run_params['kernels'] and adds
         each to the design matrix
@@ -15,7 +15,7 @@ def add_kernels(design, run_params, bod, response):
         design          the design matrix for this model
         run_params      the run_json for this model
         bod             COMB behaviorOphysPaneDataset object for this experiment
-        response        dictionary about response arrays for this model
+        activity_trace        dictionary about activity_trace arrays for this model
     '''
     run_params['failed_kernels'] = set()
     run_params['failed_dropouts'] = set()
@@ -24,9 +24,9 @@ def add_kernels(design, run_params, bod, response):
         if 'num_weights' not in run_params['kernels'][kernel_name]:
             run_params['kernels'][kernel_name]['num_weights'] = None
         if run_params['kernels'][kernel_name]['type'] == 'discrete':
-            design = add_discrete_kernel_by_label(kernel_name, design, run_params, bod, response)
+            design = add_discrete_kernel_by_label(kernel_name, design, run_params, bod, activity_trace)
         else:
-            design = add_continuous_kernel_by_label(kernel_name, design, run_params, bod, response)   
+            design = add_continuous_kernel_by_label(kernel_name, design, run_params, bod, activity_trace)   
 
     clean_failed_kernels(run_params)
     return design
@@ -78,14 +78,14 @@ def clean_failed_kernels(run_params):
         print()
 
 
-def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, response):
+def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, activity_trace):
     '''
         Adds the kernel specified by <kernel_name> to the design matrix
         kernel_name          <str> the label for this kernel, will raise an error if not implemented
         design          the design matrix for this model
         run_params      the run_json for this model
         bod             COMB behaviorOphysPaneDataset object for this experiment
-        response        dictionary about response arrays for this model      
+        activity_trace        dictionary about activity_trace arrays for this model      
     ''' 
     print('    Adding kernel: '+kernel_name)
     try:
@@ -93,14 +93,14 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         unstd_timeseries = None
 
         if feature == 'intercept':
-            timeseries = np.ones(len(response['timestamps']))
+            timeseries = np.ones(len(activity_trace['timestamps']))
         elif feature == 'time':
-            timeseries = np.array(range(1,len(response['timestamps'])+1))
+            timeseries = np.array(range(1,len(activity_trace['timestamps'])+1))
             timeseries = timeseries/len(timeseries)
         elif feature == 'running':
             running_df = bod.running_speed
             running_df = running_df.rename(columns={'speed':'values'})
-            timeseries = interpolate_to_ophys_timestamps(response, running_df)['values'].values
+            timeseries = interpolate_to_ophys_timestamps(activity_trace, running_df)['values'].values
             #timeseries = standardize_inputs(timeseries, mean_center=False,unit_variance=False, max_value=run_params['max_run_speed'])
             unstd_timeseries = timeseries
             timeseries = standardize_inputs(timeseries)
@@ -111,16 +111,16 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         #         'timestamps': bod.behavior_movie_timestamps,
         #         'values': bod.behavior_movie_pc_activations[:,PC_number]
         #     })
-        #     timeseries = interpolate_to_ophys_timestamps(response, face_motion_df)['values'].values
+        #     timeseries = interpolate_to_ophys_timestamps(activity_trace, face_motion_df)['values'].values
         #     timeseries = standardize_inputs(timeseries, mean_center=run_params['mean_center_inputs'], unit_variance=run_params['unit_variance_inputs'])
         elif feature == 'population_mean':
-            timeseries = np.mean(response['response_arr'],1).values
+            timeseries = np.mean(activity_trace['activity_trace_arr'],1).values
             timeseries = standardize_inputs(timeseries, mean_center=run_params['mean_center_inputs'], unit_variance=run_params['unit_variance_inputs'])
         elif feature == 'Population_Activity_PC1':
             pca = PCA()
-            pca.fit(response['response_arr'].values)
-            response_pca = pca.transform(response['response_arr'].values)
-            timeseries = response_pca[:,0]
+            pca.fit(activity_trace['activity_trace_arr'].values)
+            activity_trace_pca = pca.transform(activity_trace['activity_trace_arr'].values)
+            timeseries = activity_trace_pca[:,0]
             timeseries = standardize_inputs(timeseries, mean_center=run_params['mean_center_inputs'], unit_variance=run_params['unit_variance_inputs'])
         # elif (len(feature) > 6) & ( feature[0:6] == 'model_'):
         #     bsid = bod.metadata['behavior_session_id']
@@ -129,17 +129,17 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         #     weight_df = pd.DataFrame()
         #     weight_df['timestamps'] = bod.stimulus_presentations.start_time.values
         #     weight_df['values'] = weight.values
-        #     timeseries = interpolate_to_ophys_timestamps(response, weight_df)
+        #     timeseries = interpolate_to_ophys_timestamps(activity_trace, weight_df)
         #     timeseries['values'].fillna(method='ffill',inplace=True) # TODO investigate where these NaNs come from
         #     timeseries = timeseries['values'].values
         #     timeseries = standardize_inputs(timeseries, mean_center=run_params['mean_center_inputs'],unit_variance=run_params['unit_variance_inputs'])
         elif feature == 'pupil':
-            ophys_eye = get_pupil_area(bod, ophys_timestamps=response['timestamps'])
+            ophys_eye = get_pupil_area(bod, ophys_timestamps=activity_trace['timestamps'])
             timeseries = ophys_eye['pupil_area_zscore'].values
             unstd_timeseries = ophys_eye['pupil_area'].values
         # elif feature == 'lick_model' or feature == 'groom_model':
         #     if not hasattr(bod, 'lick_groom_model'):
-        #         bod.lick_groom_model = process_behavior_predictions(bod, ophys_timestamps = response['timestamps'])
+        #         bod.lick_groom_model = process_behavior_predictions(bod, ophys_timestamps = activity_trace['timestamps'])
         #     timeseries = bod.lick_groom_model[feature.split('_')[0]].values
         else:
             raise Exception('Could not resolve kernel label')
@@ -164,7 +164,7 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         return design
     else:
         #assert length of values is same as length of timestamps
-        assert len(timeseries) == response['response_arr'].values.shape[0], 'Length of continuous regressor must match length of timestamps'
+        assert len(timeseries) == activity_trace['activity_trace_arr'].values.shape[0], 'Length of continuous regressor must match length of timestamps'
 
         # Add to design matrix
         design.add_kernel(
@@ -179,12 +179,12 @@ def add_continuous_kernel_by_label(kernel_name, design, run_params, bod, respons
         return design
 
 
-def interpolate_to_ophys_timestamps(response, df):
+def interpolate_to_ophys_timestamps(activity_trace, df):
     """ Interpolate timeseries onto ophys timestamps
 
     Parameters
     ----------
-    response : dict
+    activity_trace : dict
         ophys data, containing 'timestamps':<array of timestamps>
     df : pd.dataframe
         ith columns:
@@ -204,8 +204,8 @@ def interpolate_to_ophys_timestamps(response, df):
     )
 
     interpolated = pd.DataFrame({
-        'timestamps':response['timestamps'],
-        'values':f(response['timestamps'])
+        'timestamps':activity_trace['timestamps'],
+        'values':f(activity_trace['timestamps'])
     })
 
     return interpolated
@@ -238,14 +238,14 @@ def standardize_inputs(timeseries, mean_center=True, unit_variance=True, max_val
     return timeseries
 
 
-def add_discrete_kernel_by_label(kernel_name, design, run_params, bod, response):
+def add_discrete_kernel_by_label(kernel_name, design, run_params, bod, activity_trace):
     '''
         Adds the kernel specified by <kernel_name> to the design matrix
         kernel_name     <str> the label for this kernel, will raise an error if not implemented
         design          the design matrix for this model
         run_params      the run_json for this model
         bod             COMB behaviorOphysDataset object for this experiment
-        response        dictionary about response arrays for this model      
+        activity_trace        dictionary about activity_trace arrays for this model      
     ''' 
     print('    Adding kernel: '+kernel_name)
     try:
@@ -281,11 +281,14 @@ def add_discrete_kernel_by_label(kernel_name, design, run_params, bod, response)
             else:
                 feature_times = bod.trials.query(feature)['change_time'].values
             feature_times = feature_times[~np.isnan(feature_times)]
-            if len(bod.rewards) < 5: ## HARD CODING THIS VALUE
-                raise Exception('Trial type regressors arent defined for passive sessions (sessions with less than 5 rewards)')
+            # This does not work well with extinction sessions, where hits are not rewarded.
+            # TODO: set a better way to distinguish between passive and extinction sessions.
+            # For now, there is no passive session
+            # if len(bod.rewards) < 5: ## HARD CODING THIS VALUE
+            #     raise Exception('Trial type regressors arent defined for passive sessions (sessions with less than 5 rewards)')            
         elif feature == 'passive_change':
             if len(bod.rewards) > 5: 
-                raise Exception('\tPassive Change kernel cant be added to active sessions')               
+                raise Exception('\tPassive Change kernel cant be added to active sessions')
             feature_times = bod.stimulus_presentations.query('is_change')['start_time'].values
             feature_times = feature_times[~np.isnan(feature_times)]
         elif feature == 'any-image':
@@ -329,7 +332,7 @@ def add_discrete_kernel_by_label(kernel_name, design, run_params, bod, response)
         # )
         return design       
     else:
-        features_vec, timestamps = np.histogram(feature_times, bins=response['time_bins'])
+        features_vec, timestamps = np.histogram(feature_times, bins=activity_trace['time_bins'])
     
         if (feature == 'lick_bouts') or (feature == 'licks'):
             unstd_timeseries = features_vec.copy()
@@ -359,8 +362,11 @@ def get_pupil_area(bod, ophys_timestamps):
     '''    
 
     # Set parameters for blink detection, and load data
-    eye_df = bod.eye_tracking_table.copy(deep=True)
+    eye_df = bod.eye_tracking_table.copy(deep=True) # bad fit filtered out.
     pupil_area_df = eye_df.query('eye_is_bad_frame==False and pupil_is_bad_frame==False')[['timestamps', 'pupil_area']].copy()
+     # pupil area should be median filtered
+    md_filt_window = 30 # 0.5 sec, assuming 60 Hz video            
+    pupil_area_df['pupil_area'] = pupil_area_df['pupil_area'].rolling(md_filt_window, center=True).median()
 
     # Interpolate everything onto ophys_timestamps
     ophys_eye = pd.DataFrame({'timestamps':ophys_timestamps})

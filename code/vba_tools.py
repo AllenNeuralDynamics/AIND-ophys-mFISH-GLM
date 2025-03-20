@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import pickle
 import os
+import sys
+from pathlib import Path
 from tqdm import tqdm
 
 from scipy.stats import spearmanr
@@ -37,6 +39,21 @@ import seaborn as sns
 from dask import delayed, compute
 from dask.distributed import Client
 
+import ray
+os.environ["RAY_verbose_spill_logs"] = "0"
+
+def initialize_ray(spill_dir="/root/capsule/scratch/ray",
+                    base_dir='/root/capsule/code'):
+    """ Initialize ray """
+    sys.path.append(base_dir)
+    exclude_files = [str(v.relative_to(Path(base_dir))) for v in Path(base_dir).rglob("*.ipynb")]
+
+    ray.init(ignore_reinit_error=True,
+            _temp_dir=spill_dir,
+            object_store_memory=(2**10)**3 * 4,
+            _system_config={"object_spilling_config": f'{{"type":"filesystem","params":{{"directory_path":"{spill_dir}"}}}}'},
+            runtime_env={"working_dir": base_dir,
+                        "excludes": exclude_files})
 
 ########################################################
 ## VBA dimensionality reduction > clustering > plotting
@@ -841,7 +858,10 @@ def get_eigenDecomposition(A, max_n_clusters=25):
     return eigenvalues, eigenvectors, nb_clusters
 
 
-def get_silhouette_scores(X, model=SpectralClustering, n_clusters=np.arange(2, 10), metric='euclidean', n_boots=20):
+def get_silhouette_scores(X, model=SpectralClustering,
+                          n_clusters=np.arange(2, 10),
+                          metric='euclidean',
+                          n_boots=20, parallel=True):
     '''
     Computes silhouette scores for given n clusters.
     :param X: data, n observations by n features
@@ -858,44 +878,82 @@ def get_silhouette_scores(X, model=SpectralClustering, n_clusters=np.arange(2, 1
     print('NaNs in the array = ' + str(np.sum(X == np.nan)))
     silhouette_scores = []
     silhouette_std = []
+
+    def _calculate_silhouette_score(n_cluster, n_boot, X, model, metric):
+        model.n_clusters = n_cluster
+        md = model.fit(X)
+        try:
+            labels = md.labels_
+        except AttributeError:
+            labels = md
+        return silhouette_score(X, labels, metric=metric)
+    if parallel:
+        if not ray.is_initialized():
+            initialize_ray()
+            shutdown_ray = True
+        else:
+            shutdown_ray = False
     for n_cluster in n_clusters:
-        s_tmp = []
-        for n_boot in range(0, n_boots):
-            model.n_clusters = n_cluster
-            md = model.fit(X)
-            try:
-                labels = md.labels_
-            except AttributeError:
-                labels = md
-            s_tmp.append(silhouette_score(X, labels, metric=metric))
+        if parallel:
+            futures = []
+            for n_boot in range(0, n_boots):
+                futures.append(ray.remote(_calculate_silhouette_score).remote(
+                    n_cluster, n_boot, X, model, metric))
+            s_tmp = ray.get(futures)
+        else:
+            s_tmp = []
+            for n_boot in range(0, n_boots):
+                s_tmp.append(_calculate_silhouette_score(
+                    n_cluster, n_boot, X, model, metric))
         silhouette_scores.append(np.mean(s_tmp))
         silhouette_std.append(np.std(s_tmp))
         print('n {} clusters mean score = {}'.format(n_cluster, np.mean(s_tmp)))
+    if shutdown_ray:
+        ray.shutdown()
     return silhouette_scores, silhouette_std
 
 
-def get_labels_for_coclust_matrix(X, model=SpectralClustering, nboot=np.arange(100), n_clusters=8):
+def get_labels_for_coclust_matrix(X, model=SpectralClustering, nboots=100, n_clusters=8,
+                                  parallel=True):
     '''
 
     :param X: (ndarray) data, n observations by n features
     :param model: (clustering object) default =  SpectralClustering; clustering method to use. Object must be initialized.
-    :param nboot: (list or an array) default = 100, number of clustering repeats
+    :param nboots: (int) default = 100, number of clustering repeats
     :param n_clusters: (num) default = 8
     ___________
     :return: labels: matrix of labels, n repeats by n observations
     '''
+    if parallel:
+        if not ray.is_initialized():
+            initialize_ray() # need to shutdown
+            shutdown_ray = True
+        else:
+            shutdown_ray = False
     if model is SpectralClustering:
         model = model()
     labels = []
     if n_clusters is not None:
         model.n_clusters = n_clusters
-    for _ in tqdm(nboot):
-        md = model.fit(X)
-        labels.append(md.labels_)
+    if parallel:
+        def _get_label(model, x):
+            return model.fit(x).labels_
+        futures = []
+        for _ in range(nboots):
+            futures.append(ray.remote(_get_label).remote(model, X))
+        labels = ray.get(futures)
+    else:
+        for _ in tqdm(range(nboots)):
+            md = model.fit(X)
+            labels.append(md.labels_)
+    
+    if shutdown_ray:
+        ray.shutdown()
     return labels
 
 
-def get_coClust_matrix(X, model=SpectralClustering, nboot=np.arange(150), n_clusters=8):
+def get_coClust_matrix(X, model=SpectralClustering, nboots=150, n_clusters=8,
+                        parallel=True):
     '''
 
     :param X: (ndarray) data, n observations by n features
@@ -908,16 +966,18 @@ def get_coClust_matrix(X, model=SpectralClustering, nboot=np.arange(150), n_clus
     # model = model()
     labels = get_labels_for_coclust_matrix(X=X,
                                            model=model,
-                                           nboot=nboot,
-                                           n_clusters=n_clusters)
-    coClust_matrix = []
+                                           nboots=nboots,
+                                           n_clusters=n_clusters,
+                                           parallel=parallel)
+    coclust_mat = []
     for i in range(np.shape(labels)[1]):  # get cluster id of this observation
-        this_coClust_matrix = []
-        for j in nboot:  # find other observations with this cluster id
+        this_coclust_mat = []
+        for j in np.arange(nboots):  # find other observations with this cluster id
             id = labels[j][i]
-            this_coClust_matrix.append(labels[j] == id)
-        coClust_matrix.append(np.sum(this_coClust_matrix, axis=0) / max(nboot))
-    return coClust_matrix
+            this_coclust_mat.append(labels[j] == id)
+        coclust_mat.append(np.sum(this_coclust_mat, axis=0) / nboots)
+    coclust_mat = np.vstack(coclust_mat)
+    return coclust_mat
 
 
 def clean_cells_table(cells_table=None, columns=None, add_binned_depth=True):
@@ -1212,6 +1272,12 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     else:
         data_array = data
 
+    if parallel:
+        if not ray.is_initialized():
+            initialize_ray()
+            shutdown_ray = True
+        else:
+            shutdown_ray = False
     gap_statistics = {}
     reference_inertia = []
     reference_sem = []
@@ -1233,11 +1299,11 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     for k in range(1, k_max):
         print(f'Reference inertia for {k} clusters')
         if parallel:
-            task = []
-            with Client() as client:
-                for _ in range(n_boots):
-                     task.append(delayed(_compute_inertia_shuffled)(k, data, reference_shuffle, clustering, metric))
-                local_ref_inertia = compute(task)
+            futures = []
+            for _ in range(n_boots):
+                futures.append(ray.remote(_compute_inertia_shuffled).remote(
+                    k, data, reference_shuffle, clustering, metric))
+            local_ref_inertia = ray.get(futures)
         else:
             local_ref_inertia = []
             for _ in range(n_boots):
@@ -1255,11 +1321,11 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     for k in range(1, k_max):
         print(f'On data inertia for {k} clusters')
         if parallel:
-            task = []
-            with Client() as client:
-                for _ in range(n_boots):
-                    task.append(delayed(_compute_ondata_inertia)(k, data_array, clustering, metric))
-                local_ondata_inertia = compute(task)
+            futures = []
+            for _ in range(n_boots):
+                futures.append(ray.remote(_compute_ondata_inertia).remote(
+                                            k, data_array, clustering, metric))
+            local_ondata_inertia = ray.get(futures)
         else:
             local_ondata_inertia = []
             for _ in range(n_boots):
@@ -1271,6 +1337,8 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
         gap_mean.append(np.mean(np.subtract(np.log(local_ondata_inertia), np.log(local_ref_inertia))))
         gap_sem.append(sem(np.subtract(np.log(local_ondata_inertia), np.log(local_ref_inertia))))
 
+    if shutdown_ray:
+        ray.shutdown()
     # maybe plotting error bars with this metric would be helpful but for now I'll leave it
     gap = np.log(reference_inertia) - np.log(ondata_inertia)
 
