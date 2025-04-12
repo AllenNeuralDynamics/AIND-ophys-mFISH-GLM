@@ -113,8 +113,8 @@ def cross_session_normalization(matched_roi_df, session_info_df,
     """ Normalize coding scores across sessions.
     Start from adjusted variance, not from coding score calculated in each session.
     """
-    coding_score_table = matched_roi_df.reset_index()[['roi_name',
-                                            'unique_cell_name', 'session_ind',
+    coding_score_table = matched_roi_df.reset_index()[['session_roi_name',
+                                            'unique_roi_name', 'session_ind',
                                             'session_key', 'fov_name',
                                             'roi_session_index']].copy()
     session_keys = np.sort(coding_score_table.session_key.unique())
@@ -156,19 +156,19 @@ coding_score_v{dm_version:02}_{session_key}_{data_type}{suffix}.nc'
                                     cell_roi_id=session_matched_roi_name,
                                     model=include_models).copy()
             
-            # Swap cell_roi_id which is session-specific to unique_cell_name
+            # Swap cell_roi_id which is session-specific to unique_roi_name
             # for concatenation across sessions
-            unique_cell_names = []
+            unique_roi_names = []
             for cell_roi_id in coding_score_session.cell_roi_id.values:
                 roi_name = f'{session_key}_{cell_roi_id}'
-                unique_cell_names.append(matched_roi_df.loc[
-                                    roi_name, 'unique_cell_name'])
+                unique_roi_names.append(matched_roi_df.loc[
+                                    roi_name, 'unique_roi_name'])
 
             coding_score_session = coding_score_session.assign_coords(
-                                    unique_cell_name=(
-                                        "cell_roi_id", unique_cell_names))
+                                    unique_roi_name=(
+                                        "cell_roi_id", unique_roi_names))
             coding_score_session = coding_score_session.swap_dims(
-                                    {"cell_roi_id": "unique_cell_name"})
+                                    {"cell_roi_id": "unique_roi_name"})
             coding_score_session = coding_score_session.reset_coords(
                                     'cell_roi_id', drop=True)
         if coding_score_raw is None:
@@ -211,7 +211,7 @@ def concatenate_normalized_coding_scores(mouse_ids,
                                 glm_dir=Path('/root/capsule/scratch/glm')):
     """ Concatenate normalized coding scores across mice.
     Assume that session keys are already visually validated (from a notebook).
-    Change unique_cell_name to have mouse_id at the beginning to make it unique across mice.
+    Unique_roi_name is unique across mice.
     Make sure there is no nan value.
     """
     coding_score_normalized_concat = None
@@ -219,13 +219,11 @@ def concatenate_normalized_coding_scores(mouse_ids,
         cs_norm_fn = f'coding_score_fnn_normalized_v{dm_version:02}_{mouse_id}_{data_type}{suffix}.nc'
         with xr.open_dataarray(glm_dir / cs_norm_fn) as ds:
             ds = swap_dims_for_fnn(ds)
-        # add mouse_id to unique_cell_name to make it unique
-        ds = ds.assign_coords(unique_cell_name=[f'{mouse_id}_{ucn}' for ucn in ds.unique_cell_name.values])
         if coding_score_normalized_concat is None:
             coding_score_normalized_concat = ds
         else:
             coding_score_normalized_concat = xr.concat([coding_score_normalized_concat, ds],
-                                            dim=('unique_cell_name'))
+                                            dim=('unique_roi_name'))
     assert len(np.where(np.isnan(coding_score_normalized_concat.values))[0]) == 0
     return coding_score_normalized_concat
 

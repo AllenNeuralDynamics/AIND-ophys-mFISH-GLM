@@ -430,9 +430,9 @@ def get_fnn_all_matched_roi_df(fnn_session_keys, roicat_df):
     """ Get all matched ROIs for FNN sessions.
     """
     fnn_roi_df = roicat_df.query('session_key in @fnn_session_keys and valid_roi and matched')
-    fnn_uc_series = fnn_roi_df.groupby('unique_cell_name').size()
-    fnn_matched_uc = fnn_uc_series.index.values[np.where(fnn_uc_series==len(fnn_session_keys))[0]]    
-    fnn_all_matched_roi_df = fnn_roi_df.query('unique_cell_name in @fnn_matched_uc')
+    fnn_urn_series = fnn_roi_df.groupby('unique_roi_name').size()
+    fnn_matched_urn = fnn_urn_series.index.values[np.where(fnn_urn_series==len(fnn_session_keys))[0]]    
+    fnn_all_matched_roi_df = fnn_roi_df.query('unique_roi_name in @fnn_matched_urn')
     assert fnn_all_matched_roi_df.valid_roi.all()
     return fnn_all_matched_roi_df
 
