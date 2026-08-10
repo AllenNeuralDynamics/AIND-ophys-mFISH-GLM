@@ -29,7 +29,10 @@ from sklearn.cluster import KMeans
 # import visual_behavior_glm.GLM_analysis_tools as gat  # to get recent glm results
 # import visual_behavior_glm.GLM_params as glm_params
 
-import umap
+try:
+    import umap
+except ImportError:  # optional: only needed for the UMAP embedding helpers
+    umap = None
 import random
 from scipy import signal
 import matplotlib.pyplot as plt
@@ -39,7 +42,16 @@ import seaborn as sns
 from dask import delayed, compute
 from dask.distributed import Client
 
-import ray
+try:
+    import ray
+except ImportError:  # optional: clustering helpers fall back to serial execution
+    ray = None
+
+
+def ray_available():
+    """True if ray was importable. Used to degrade parallel=True to serial."""
+    return ray is not None
+
 os.environ["RAY_verbose_spill_logs"] = "0"
 
 def initialize_ray(spill_dir="/root/capsule/scratch/ray",
@@ -887,6 +899,11 @@ def get_silhouette_scores(X, model=SpectralClustering,
         except AttributeError:
             labels = md
         return silhouette_score(X, labels, metric=metric)
+    if parallel and not ray_available():
+        # ray is optional; without it, fall back to serial execution rather than
+        # raising AttributeError on ray.is_initialized() below.
+        parallel = False
+    shutdown_ray = False   # bound unconditionally: read at the end of this function
     if parallel:
         if not ray.is_initialized():
             initialize_ray()
@@ -924,6 +941,11 @@ def get_labels_for_coclust_matrix(X, model=SpectralClustering, nboots=100, n_clu
     ___________
     :return: labels: matrix of labels, n repeats by n observations
     '''
+    if parallel and not ray_available():
+        # ray is optional; without it, fall back to serial execution rather than
+        # raising AttributeError on ray.is_initialized() below.
+        parallel = False
+    shutdown_ray = False   # bound unconditionally: read at the end of this function
     if parallel:
         if not ray.is_initialized():
             initialize_ray() # need to shutdown
@@ -1272,6 +1294,11 @@ def compute_gap(clustering, data, k_max=5, n_boots=20, reference_shuffle='all', 
     else:
         data_array = data
 
+    if parallel and not ray_available():
+        # ray is optional; without it, fall back to serial execution rather than
+        # raising AttributeError on ray.is_initialized() below.
+        parallel = False
+    shutdown_ray = False   # bound unconditionally: read at the end of this function
     if parallel:
         if not ray.is_initialized():
             initialize_ray()
