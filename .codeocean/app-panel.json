@@ -1,9 +1,11 @@
 {
 	"version": 1,
+	"named_parameters": true,
 	"parameters": [
 		{
 			"id": "nvtv1hP9N5OCM6ix",
 			"name": "test",
+			"param_name": "param1",
 			"description": "to run test",
 			"help_text": "Pass 1 to test. One plane, min(num_rois, 30), kernel_test.json",
 			"type": "text",
@@ -15,6 +17,7 @@
 		{
 			"id": "kJ2mXqR7sLpWdYcA",
 			"name": "kernels_config",
+			"param_name": "param2",
 			"description": "Kernel configuration file",
 			"help_text": "Kernel JSON filename in /capsule/code/kernel_json_files/. E.g. kernel_v01.json",
 			"type": "text",
