@@ -17,7 +17,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import xarray as xr
 
-from glm_session_utils import is_plane_dir
+from load_data import is_plane_dir
 
 
 def _zscore_cols(M):

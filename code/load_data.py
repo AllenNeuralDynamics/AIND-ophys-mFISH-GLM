@@ -2,7 +2,9 @@ from comb.behavior_ophys_dataset import BehaviorOphysDataset, BehaviorMultiplane
 from comb.behavior_session_dataset import BehaviorSessionDataset
 from lamf_analysis import utils as lamf_utils
 import os
+import re
 import glob
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import numpy as np
 import xarray as xr
@@ -474,3 +476,87 @@ def check_same_number_per_stimulus(sets_of_stimulus_timestamps, run_params):
     return sets_of_stimulus_timestamps, mode
 
 
+# ── capsule-specific session discovery and multi-plane loading ────────────────
+
+def discover_session(data_dir: Path):
+    """Locate raw, processed, and eye-tracking directories under data_dir.
+
+    Returns (session_name, session_key, raw_dir, proc_dir, eye_dir).
+    """
+    candidates = sorted(Path(data_dir).iterdir())
+
+    def _is_raw(p):
+        return (p.is_dir()
+                and re.match(r'^multiplane-ophys_\d+_\d{4}-\d{2}-\d{2}_', p.name)
+                and '_processed' not in p.name
+                and '_lp-eye'    not in p.name
+                and '_dlc-eye'   not in p.name
+                and '_stim'      not in p.name)
+
+    raw_dirs = [p for p in candidates if _is_raw(p)]
+    if len(raw_dirs) != 1:
+        raise ValueError(
+            f'Expected 1 raw session dir in {data_dir}, found {len(raw_dirs)}: '
+            f'{[p.name for p in raw_dirs]}')
+    raw_dir      = raw_dirs[0]
+    session_name = raw_dir.name
+    session_key  = '_'.join(session_name.split('_')[1:3])   # e.g. '800792_2025-08-18'
+
+    proc_dirs = sorted([p for p in candidates if p.is_dir()
+                        and p.name.startswith(session_name + '_processed')])
+    if not proc_dirs:
+        raise ValueError(f'No processed dir for {session_name}')
+    proc_dir = proc_dirs[-1]
+
+    eye_dirs = sorted([p for p in candidates if p.is_dir()
+                       and p.name.startswith(session_name)
+                       and ('_lp-eye' in p.name or '_dlc-eye' in p.name)])
+    if not eye_dirs:
+        raise ValueError(f'No eye-tracking dir for {session_name}')
+    lp = [p for p in eye_dirs if '_lp-eye' in p.name]
+    eye_dir = lp[-1] if lp else eye_dirs[-1]
+
+    return session_name, session_key, raw_dir, proc_dir, eye_dir
+
+
+def is_plane_dir(p: Path) -> bool:
+    return p.is_dir() and bool(re.match(r'^[A-Za-z]+_\d+$', p.name))
+
+
+def merge_trials(bod):
+    """Add hit/miss columns to bod.stimulus_presentations (mutates in place)."""
+    stim   = bod.stimulus_presentations
+    trials = bod.trials
+    stim['is_change'] = stim.is_change.astype(bool)
+    stim['hit']  = False
+    stim['miss'] = False
+    stim.loc[stim.start_time.isin(trials.query('hit').change_time.values),  'hit']  = True
+    stim.loc[stim.start_time.isin(trials.query('miss').change_time.values), 'miss'] = True
+
+
+def _load_plane(plane_dir, raw_dir, eye_dir):
+    bod = BehaviorOphysDataset(
+        plane_folder_path=plane_dir,
+        raw_folder_path=raw_dir,
+        eye_tracking_path=eye_dir,
+        pipeline_version='v6',
+    )
+    bod.metadata['ophys_plane_id'] = plane_dir.name
+    merge_trials(bod)
+    return bod
+
+
+def load_all_planes(proc_dir, raw_dir, eye_dir, n_workers=4):
+    """Load all imaging planes from a processed session directory in parallel.
+
+    Returns a list of BehaviorOphysDataset objects sorted by plane name.
+    """
+    plane_dirs = sorted([p for p in Path(proc_dir).iterdir() if is_plane_dir(p)])
+    print(f'Loading {len(plane_dirs)} planes ({n_workers} threads): {[p.name for p in plane_dirs]}')
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        futures = {ex.submit(_load_plane, pd, raw_dir, eye_dir): pd for pd in plane_dirs}
+        bod_map = {}
+        for fut, pd in futures.items():
+            bod_map[pd.name] = fut.result()
+            print(f'  loaded {pd.name}')
+    return [bod_map[pd.name] for pd in plane_dirs]

@@ -32,6 +32,7 @@ os.environ.setdefault('MKL_NUM_THREADS', '1')
 import argparse
 import datetime
 import json
+import multiprocessing
 import re
 import sys
 from pathlib import Path
@@ -51,11 +52,53 @@ import xarray as xr
 
 import glm_fit_tools as gft
 import design_matrix_tools as dmtools
-from glm_session_utils import discover_session, load_all_planes, collect_fold_results_mp
+import load_data
 from qc_figures import save_qc_summary, save_heatmap_figure
-from aind_metadata_utils import save_processing_json, save_data_description_json
+from aind_metadata_utils import write_metadata_files
 
 
+# ── fork-based parallel GLM fit (replaces ray) ───────────────────────────────
+_WORKER_DATA: dict = {}
+
+
+def _one_model_mp(model_label):
+    d = _WORKER_DATA
+    return gft.collect_model_results(
+        d['run_params'], d['fit_params'],
+        d['X_tr'], d['X_te'], d['y_tr'], d['y_te'],
+        d['nested'], model_label)
+
+
+def _collect_fold_results_mp(run_params, fit_params,
+                              X_tr, X_te, y_tr, y_te,
+                              nested, num_cores=None):
+    """Drop-in for gft.collect_fold_results_parallel using fork + Pool."""
+    global _WORKER_DATA
+    X_tr.load(); X_te.load(); y_tr.load(); y_te.load()
+    _WORKER_DATA.update(
+        run_params=run_params, fit_params=fit_params,
+        X_tr=X_tr, X_te=X_te, y_tr=y_tr, y_te=y_te, nested=nested,
+    )
+    models    = list(run_params['dropouts'].keys())
+    n_workers = num_cores or min(len(models), os.cpu_count() or 16)
+    ctx = multiprocessing.get_context('fork')
+    with ctx.Pool(processes=n_workers) as pool:
+        results = pool.map(_one_model_mp, models)
+
+    lam_f = W_f = vetr_f = vete_f = ver_f = None
+    for mi, (lam, W, ve_tr, ve_te, ve_r) in enumerate(results):
+        if mi == 0:
+            lam_f, W_f, vetr_f, vete_f, ver_f = lam, W, ve_tr, ve_te, ve_r
+        else:
+            lam_f  = xr.concat([lam_f,  lam],   dim='model')
+            W_f    = xr.concat([W_f,    W],      dim='model')
+            vetr_f = xr.concat([vetr_f, ve_tr],  dim='model')
+            vete_f = xr.concat([vete_f, ve_te],  dim='model')
+            ver_f  = xr.concat([ver_f,  ve_r],   dim='model')
+    return lam_f, W_f, vetr_f, vete_f, ver_f
+
+
+# ── entry point ───────────────────────────────────────────────────────────────
 def run():
     parser = argparse.ArgumentParser(
         description='Reproducible GLM fit for AIND mFISH multiplane-ophys sessions.')
@@ -79,7 +122,8 @@ def run():
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Discover session paths
-    session_name, session_key, raw_dir, proc_dir, eye_dir = discover_session(data_dir)
+    session_name, session_key, raw_dir, proc_dir, eye_dir = \
+        load_data.discover_session(data_dir)
     print(f'Session : {session_name}')
     print(f'Key     : {session_key}')
     print(f'Proc    : {proc_dir.name}')
@@ -113,7 +157,7 @@ def run():
         print('Design matrix artifacts already exist — skipping build.')
     else:
         print('Loading planes...')
-        bod_list = load_all_planes(proc_dir, raw_dir, eye_dir)
+        bod_list = load_data.load_all_planes(proc_dir, raw_dir, eye_dir)
         print('Building design matrix...')
         run_params, design, X, activity_trace = dmtools.build_design_matrix(
             bod_list, kernel_dict, args.data_type)
@@ -133,7 +177,7 @@ def run():
         print('Design matrix artifacts saved.')
 
     # 5. Configure and run GLM
-    gft.collect_fold_results_parallel = collect_fold_results_mp
+    gft.collect_fold_results_parallel = _collect_fold_results_mp
 
     fit_params = gft.default_fit_params()
     fit_params['cv_fold']        = args.cv_folds
@@ -186,13 +230,29 @@ def run():
 
     # 7. Metadata
     end_time = datetime.datetime.now()
-    save_processing_json(
-        session_key, session_name, args.data_type,
-        kernel_config_path, kernel_dict,
-        fit_params, proc_dir, save_dir,
-        start_time, end_time,
+    run_parameters = {
+        'session_key':         session_key,
+        'data_type':           args.data_type,
+        'kernels_config':      str(kernel_config_path),
+        'kernel_version':      version,
+        'kernels':             kernel_dict,
+        'cv_folds':            args.cv_folds,
+        'cv_nested_folds':     args.cv_nested_folds,
+        'n_lambdas':           args.n_lambdas,
+        'lambda_min':          args.lambda_min,
+        'lambda_max':          args.lambda_max,
+        'min_activity_support': args.min_activity_support,
+    }
+    write_metadata_files(
+        session_name=session_name,
+        proc_dir=proc_dir,
+        save_dir=save_dir,
+        start_dt=start_time,
+        end_dt=end_time,
+        run_parameters=run_parameters,
+        data_dir=data_dir,
+        results_dir=results_dir,
     )
-    save_data_description_json(proc_dir, save_dir)
 
 
 if __name__ == '__main__':
