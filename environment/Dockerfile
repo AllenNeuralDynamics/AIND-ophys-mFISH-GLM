@@ -27,15 +27,6 @@ RUN pip install -U --no-cache-dir \
     tables \
     aind-data-schema==1.2.0
 
-RUN cd / \
-    && git clone https://github.com/AllenNeuralDynamics/comb \
-    && cd comb \
-    && pip install -e .
-
-RUN cd / \
-    && git clone https://github.com/AllenNeuralDynamics/lamf-analysis \
-    && cd lamf-analysis \
-    && pip install -e .
 
 COPY postInstall /
 RUN /postInstall
