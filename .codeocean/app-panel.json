@@ -16,10 +16,10 @@
 			"id": "kJ2mXqR7sLpWdYcA",
 			"name": "kernels_config",
 			"description": "Kernel configuration file",
-			"help_text": "Path to the kernel JSON file. Default: /capsule/code/kernel_json_files/kernel_v01.json",
+			"help_text": "Kernel JSON filename in /capsule/code/kernel_json_files/. E.g. kernel_v01.json",
 			"type": "text",
 			"value_type": "string",
-			"default_value": "/capsule/code/kernel_json_files/kernel_v01.json"
+			"default_value": "kernel_v01.json"
 		}
 	]
 }

@@ -133,10 +133,10 @@ def run():
     print(f'Eye     : {eye_dir.name}')
 
     # 2. Load kernel config
-    kernel_config_path = Path(KERNEL_DIR / 'kernel_test.json') if test_mode \
+    kernel_config_path = KERNEL_DIR / 'kernel_test.json' if test_mode \
         else Path(args.kernels_config)
     if not kernel_config_path.is_absolute():
-        kernel_config_path = (CODE_DIR / kernel_config_path).resolve()
+        kernel_config_path = KERNEL_DIR / kernel_config_path
     if not kernel_config_path.exists():
         raise FileNotFoundError(f'Kernel config not found: {kernel_config_path}')
     with open(kernel_config_path) as f:
