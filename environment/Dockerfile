@@ -1,15 +1,15 @@
 # hash:sha256:bc7d6d9fa647dc1c6b67d11e8887a4e076787a9e9c6c0429ed16acd9c6735d97
 ARG REGISTRY_HOST
-FROM $REGISTRY_HOST/codeocean/jupyterlab:3.6.1-miniconda4.12.0-python3.9-ubuntu20.04
+FROM $REGISTRY_HOST/codeocean/c1-vscode:4.20.0-pylint2023.10.1-copilot1.143.601
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG API_KEY
-ARG API_SECRET
-
 ARG GIT_ASKPASS
-ARG GIT_ACCESS_TOKEN
 COPY git-ask-pass /
 
+RUN mamba install -y -c conda-forge \
+    python==3.11 \
+    ipykernel==6.29.5 \
+    && conda clean -ya
 
 # fonts for matplotlib figures
 RUN apt-get update -y
