@@ -79,6 +79,7 @@ Each kernel entry has the following fields:
 ## Test mode
 
 Set `--test 1` to run a fast smoke-test:
+- `kernel_test.json` is used automatically (overrides `--kernels_config`)
 - Only the first imaging plane is loaded
 - Cells are capped at 30 (or the plane's cell count, whichever is smaller)
 - All other parameters apply normally
