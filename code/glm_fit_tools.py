@@ -5,7 +5,10 @@ import json
 from glob import glob
 # from dask import delayed, compute
 # from dask.distributed import Client
-import ray
+try:
+    import ray
+except ImportError:
+    ray = None
 
 ##############################################################################################################
 ## Loading and trimming data

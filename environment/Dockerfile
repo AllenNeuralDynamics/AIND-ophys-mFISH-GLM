@@ -11,52 +11,21 @@ ARG GIT_ACCESS_TOKEN
 COPY git-askpass /
 
 
-# fonts for gifs
+# fonts for matplotlib figures
 RUN apt-get update -y
 RUN apt install fonts-lato fonts-open-sans fonts-roboto fonts-mononoki -y
 
 RUN pip install -U --no-cache-dir \
     matplotlib \
     numpy==1.26.4 \
-    seaborn \
     scipy \
-    pytest \
-    pillow \
     pandas \
+    pillow \
     pyyaml \
-    ray \
-    dask \
-    distributed \
-    aind-codeocean-utils \
-    aind-data-access-api \
-    aind-ophys-utils \
-    pymongo \
+    xarray \
     scikit-learn \
-    bottleneck \
-    pympler \
-    codeocean \
-    aind-session \
     tables \
-    umap-learn \
-    pyarrow \
-    plotly \
-    ipywidgets
-
-
-RUN cd / \
-    && git clone https://github.com/AllenNeuralDynamics/aind-codeocean-api \
-    && cd aind-codeocean-api \
-    && pip install -e .
-
-RUN cd / \
-    && git clone https://github.com/AllenNeuralDynamics/aind-ophys-data-access \
-    && cd aind-ophys-data-access \
-    && pip install -e .
-
-RUN cd / \
-    && git clone https://github.com/AllenNeuralDynamics/brain_observatory_utilities_ophys \
-    && cd brain_observatory_utilities_ophys \
-    && pip install -e .
+    aind-data-schema==1.2.0
 
 RUN cd / \
     && git clone https://github.com/AllenNeuralDynamics/comb \
@@ -66,8 +35,7 @@ RUN cd / \
 RUN cd / \
     && git clone https://github.com/AllenNeuralDynamics/lamf-analysis \
     && cd lamf-analysis \
-    && pip install -e .    
+    && pip install -e .
 
 COPY postInstall /
 RUN /postInstall
-
