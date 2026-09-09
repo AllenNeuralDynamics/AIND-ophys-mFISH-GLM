@@ -102,6 +102,9 @@ def _collect_fold_results_mp(run_params, fit_params,
 def run():
     parser = argparse.ArgumentParser(
         description='Reproducible GLM fit for AIND mFISH multiplane-ophys sessions.')
+    # CO app-panel flat positional params (idx 0 = test, idx 1 = kernels_config)
+    parser.add_argument('pos_test',    nargs='?', type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument('pos_kernels', nargs='?', type=str, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         '--kernels_config', default=str(KERNEL_DIR / 'kernel_v01.json'),
         help='Path to kernel JSON file (default: kernel_json_files/kernel_v01.json)')
@@ -117,6 +120,12 @@ def run():
     parser.add_argument('--data_dir',    default=str(DATA_DIR))
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
     args = parser.parse_args()
+    # Flat positional args from CO app panel override named flags when present
+    if args.pos_test is not None:
+        args.test = args.pos_test
+    if args.pos_kernels is not None:
+        k = args.pos_kernels
+        args.kernels_config = k if k.startswith('/') else str(KERNEL_DIR / k)
     test_mode = bool(args.test)
 
     start_time  = datetime.datetime.now()
