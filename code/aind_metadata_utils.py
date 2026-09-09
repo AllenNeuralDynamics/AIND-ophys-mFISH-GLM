@@ -38,7 +38,7 @@ DATA_DIR    = Path('/data')
 RESULTS_DIR = Path('/results')
 
 INPUT_PROCESSING_DICT = {
-    'name':             'mFISH-GLM',
+    'name':             'Analysis',
     'software_version': '1.0.0',
     'code_url':         'https://github.com/AllenNeuralDynamics/AIND-ophys-mFISH-GLM',
     'notes':            'mFISH multiplane ophys encoding GLM fit',

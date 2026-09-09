@@ -5,10 +5,6 @@ import json
 from glob import glob
 # from dask import delayed, compute
 # from dask.distributed import Client
-try:
-    import ray
-except ImportError:
-    ray = None
 
 ##############################################################################################################
 ## Loading and trimming data
@@ -183,8 +179,10 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             for i in range(fit_params['cv_stratify']['num_time_stratification']):
                 stratified.append(np.arange(stratify_borders[i], stratify_borders[i+1]))
             stratified_list.append(stratified)
-        elif var == 'running_speed': #TODO: save raw running and pupil data in a separate file for design_matrix. Or use BOD (needs data search and attachment)
+        elif var == 'running_speed':
             keyword = 'running'
+            if keyword not in unstd_features:
+                continue
             running_speed = unstd_features['running'][use_indices]
             assert len(running_speed) == X_trim.shape[0]
             # smooth running_speed
@@ -213,8 +211,10 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
                 stratified = [performing_frames, nonperforming_frames]
                 stratified_list.append(stratified)
             else:
-                stratified_list.append([[], []])
+                stratified_list.append([np.array([], dtype=int), np.array([], dtype=int)])
         elif var == 'lick':
+            if 'licks' not in unstd_features:
+                continue
             licks_trace = unstd_features['licks'][use_indices]
             assert len(licks_trace) == X_trim.shape[0]
             licks = xr.DataArray(licks_trace, dims='timestamps')
@@ -231,7 +231,9 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
         elif var == 'pupil':
             keyword = 'pupil'
             pupil_trace = get_feature_traces_from_X(X, use_indices, keyword)
-            stratified = [np.where(pupil_trace > 0)[0], np.where(pupil_trace <= 0)[0]]  # using mean of pupil trace to stratify
+            if pupil_trace is None:
+                continue
+            stratified = [np.where(pupil_trace > 0)[0], np.where(pupil_trace <= 0)[0]]
             stratified_list.append(stratified)
         else:
             print(f'{var} not implemented for stratification.\nImplemented feature keywords: {stratification_features}\nContinue...')
@@ -255,13 +257,12 @@ def get_stratified_folds(fit_params, stratified_list):
     cv_inds_stratified : list
         List of stratified indices for cross-validation
     '''
-    num_stratify_vars = len(fit_params['cv_stratify']['variables'])
     cv_fold = fit_params['cv_fold']
-    cv_nested_fold = fit_params['cv_nested_fold'] 
+    cv_nested_fold = fit_params['cv_nested_fold']
 
     # collect unique sets across all stratification variables
     unique_sets = []
-    for i in range(num_stratify_vars):
+    for i in range(len(stratified_list)):
         if i == 0:
             unique_sets = stratified_list[i]
         else:
@@ -708,30 +709,15 @@ def collect_fold_results_parallel(run_params, fit_params, X_train_outer, X_test_
     vr_test_train_ratio_fold : xr.DataArray
          Ratio of variance ratio between testing and training (for overfitting check)
     '''
-    # with Client() as client:
-    # tasks = []
-    futures = []
-    models = run_params['dropouts'].keys()
-    for mi, model_label in enumerate(models):
-        # task = delayed(collect_model_results)(run_params, fit_params,
-        #                                         X_train_outer, X_test_outer,
-        #                                         y_train_outer, y_test_outer,
-        #                                         nested_fold_inds, model_label)
-        # tasks.append(task)
-        futures.append(ray.remote(
-                collect_model_results).remote(
-                    run_params, fit_params,
-                    X_train_outer, X_test_outer,
-                    y_train_outer, y_test_outer,
-                    nested_fold_inds, model_label))
+    models = list(run_params['dropouts'].keys())
+    model_results = [
+        collect_model_results(run_params, fit_params,
+                              X_train_outer, X_test_outer,
+                              y_train_outer, y_test_outer,
+                              nested_fold_inds, model_label)
+        for model_label in models
+    ]
 
-    model_results = ray.get(futures)
-    # if num_cores is None:
-    #     model_results = compute(*tasks)
-    # else:
-    #     model_results = compute(*tasks, num_workers=num_cores)
-        
-    # Collect results
     for mi in range(len(models)):
         (lambdas, W_model, var_explained_train, var_explained_test, 
          vr_test_train_ratio) = model_results[mi]

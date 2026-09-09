@@ -96,12 +96,16 @@ def save_heatmap_figure(session_key, data_type, results, save_dir,
     # Load saved matrices
     at   = xr.open_dataarray(save_dir / f'{data_type}_activity_trace_matrix.nc', mmap=False)
     X_da = xr.open_dataarray(save_dir / 'design_matrix.nc', mmap=False)
-    Y_raw    = np.asarray(at)
-    cell_ids   = list(at.cell_roi_id.values)
-    timestamps = np.asarray(at.timestamps)
+    # Subset to cells the GLM was actually fitted on (test mode may cap cells)
+    W_full   = results['W_cv'].mean(dim='test_fold_ind').sel(model='Full')
+    fitted_cells = W_full.cell_roi_id.values
+    at_fitted = at.sel(cell_roi_id=fitted_cells)
+
+    Y_raw    = np.asarray(at_fitted)
+    cell_ids   = list(at_fitted.cell_roi_id.values)
+    timestamps = np.asarray(at_fitted.timestamps)
 
     # Prediction via xarray @ so weight coordinates align regardless of build order
-    W_full  = results['W_cv'].mean(dim='test_fold_ind').sel(model='Full')
     Y_pred  = np.asarray(X_da @ W_full)
     Y_resid = Y_raw - Y_pred
 
@@ -127,11 +131,12 @@ def save_heatmap_figure(session_key, data_type, results, save_dir,
     Y_pred_s  = Y_pred[:, sort_idx]
     Y_resid_s = Y_resid[:, sort_idx]
 
-    # Behavioral traces from saved unstd_features
+    # Behavioral traces from saved unstd_features (may be absent for minimal kernel sets)
+    T = len(timestamps)
     uf            = np.load(save_dir / 'unstd_features.npy', allow_pickle=True).item()
-    running_trace = uf['running']
-    pupil_trace   = uf['pupil']
-    licks_trace   = uf['licks'].astype(float)
+    running_trace = uf.get('running', np.zeros(T))
+    pupil_trace   = uf.get('pupil',   np.zeros(T))
+    licks_trace   = uf.get('licks',   np.zeros(T, dtype=float))
 
     # Reward timestamps (optional — loads one BOD)
     reward_t_min = np.array([])
