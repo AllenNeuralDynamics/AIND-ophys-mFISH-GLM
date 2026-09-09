@@ -103,8 +103,6 @@ def run():
     parser = argparse.ArgumentParser(
         description='Reproducible GLM fit for AIND mFISH multiplane-ophys sessions.')
 
-    parser.add_argument('--test', type=int, default=0, choices=[0, 1],
-                        help='Test mode (1): load one plane only, cap at 30 cells')
     parser.add_argument('--kernels_config', default='kernel_v01.json',
         help='Path to kernel JSON file (default directory: KERNEL_DIR)')
     parser.add_argument('--data_type', default='events', choices=['dff', 'events'])
