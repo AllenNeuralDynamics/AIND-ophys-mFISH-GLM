@@ -5,7 +5,7 @@
 		{
 			"id": "kJ2mXqR7sLpWdYcA",
 			"name": "kernels_config",
-			"param_name": "param2",
+			"param_name": "kernels_config",
 			"description": "Kernel configuration file",
 			"help_text": "Kernel JSON filename in /capsule/code/kernel_json_files/. E.g. kernel_v01.json",
 			"type": "text",
@@ -83,9 +83,9 @@
 		{
 			"id": "nvtv1hP9N5OCM6ix",
 			"name": "test",
-			"param_name": "param1",
+			"param_name": "test",
 			"description": "to run test",
-			"help_text": "est mode (1): load one plane only, cap at 30 cells",
+			"help_text": "Test mode (1): load one plane only, cap at 30 cells",
 			"type": "text",
 			"value_type": "integer",
 			"default_value": "0",
