@@ -18,7 +18,7 @@
 			"param_name": "data_type",
 			"type": "text",
 			"value_type": "string",
-			"default_value": "event",
+			"default_value": "events",
 			"required": true
 		},
 		{
