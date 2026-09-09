@@ -120,7 +120,6 @@ def run():
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
 
     args = parser.parse_args()
-    
     test_mode = bool(args.test)
 
     start_time  = datetime.datetime.now()

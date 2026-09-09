@@ -1,8 +1,14 @@
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import xarray as xr
 import json
 from glob import glob
+
+
+def _ffill_bfill(da):
+    """Forward-fill then back-fill a 1-D DataArray without requiring bottleneck."""
+    return da.copy(data=pd.Series(da.values).ffill().bfill().values)
 # from dask import delayed, compute
 # from dask.distributed import Client
 
@@ -189,7 +195,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             running_speed = xr.DataArray(running_speed, dims='timestamps')
             running_speed['timestamps'] = X_trim['timestamps']
             smoothing_window = np.round(ophys_frame_rate * fit_params['cv_stratify']['running_smoothing_s']).astype(int)
-            sm_running_speed = running_speed.rolling(timestamps=smoothing_window, center=True).mean().ffill(dim='timestamps').bfill(dim='timestamps')
+            sm_running_speed = _ffill_bfill(running_speed.rolling(timestamps=smoothing_window, center=True).mean())
 
             # binarization
             running_frames = np.where(sm_running_speed > fit_params['cv_stratify']['running_threshold'])[0]
@@ -204,7 +210,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             if correct is None:
                 continue
             num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
-            rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
+            rolling_performance = _ffill_bfill(correct.rolling(timestamps=num_frames_one_min, center=True).sum())
             performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
             nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
             stratified = [performing_frames, nonperforming_frames]
@@ -219,7 +225,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             licks = xr.DataArray(licks_trace, dims='timestamps')
             licks['timestamps'] = X_trim['timestamps']
             num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
-            lick_freq = licks.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
+            lick_freq = _ffill_bfill(licks.rolling(timestamps=num_frames_one_min, center=True).sum())
             licking_frames = np.where(lick_freq > fit_params['cv_stratify']['lick_threshold'])[0]
             nonlicking_frames = np.setdiff1d(np.arange(X_trim.shape[0]), licking_frames)
             stratified = [licking_frames, nonlicking_frames]
