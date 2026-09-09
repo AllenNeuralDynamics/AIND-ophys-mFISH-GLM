@@ -102,7 +102,7 @@ def _collect_fold_results_mp(run_params, fit_params,
 def run():
     parser = argparse.ArgumentParser(
         description='Reproducible GLM fit for AIND mFISH multiplane-ophys sessions.')
-    # CO app-panel flat positional params (idx 0 = test, idx 1 = kernels_config)
+
     parser.add_argument('--test', type=int, default=0, choices=[0, 1],
                         help='Test mode (1): load one plane only, cap at 30 cells')
     parser.add_argument('--kernels_config', default='kernel_v01.json',
@@ -114,8 +114,13 @@ def run():
     parser.add_argument('--lambda_min',           type=float, default=1.0)
     parser.add_argument('--lambda_max',           type=float, default=10000.0)
     parser.add_argument('--min_activity_support', type=float, default=0.05)
+
+    parser.add_argument('--test', type=int, default=0, choices=[0, 1],
+                        help='Test mode (1): load one plane only, cap at 30 cells')
+
     parser.add_argument('--data_dir',    default=str(DATA_DIR))
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
+
     args = parser.parse_args()
     
     test_mode = bool(args.test)
