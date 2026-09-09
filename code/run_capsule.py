@@ -117,14 +117,19 @@ def run():
     parser.add_argument('--min_activity_support', type=float, default=0.05)
     parser.add_argument('--test', type=int, default=0, choices=[0, 1],
                         help='Test mode (1): load one plane only, cap at 30 cells')
+    # CO app-panel named param aliases (param_name field → --param1/--param2)
+    parser.add_argument('--param1', type=int, default=None, dest='param1', help=argparse.SUPPRESS)
+    parser.add_argument('--param2', type=str, default=None, dest='param2', help=argparse.SUPPRESS)
     parser.add_argument('--data_dir',    default=str(DATA_DIR))
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
     args = parser.parse_args()
-    # Flat positional args from CO app panel override named flags when present
-    if args.pos_test is not None:
-        args.test = args.pos_test
-    if args.pos_kernels is not None:
-        k = args.pos_kernels
+    # Map CO app-panel params (flat positional or --param1/--param2) to named flags
+    pos_test    = args.pos_test    if args.pos_test    is not None else args.param1
+    pos_kernels = args.pos_kernels if args.pos_kernels is not None else args.param2
+    if pos_test is not None:
+        args.test = pos_test
+    if pos_kernels is not None:
+        k = pos_kernels
         args.kernels_config = k if k.startswith('/') else str(KERNEL_DIR / k)
     test_mode = bool(args.test)
 
