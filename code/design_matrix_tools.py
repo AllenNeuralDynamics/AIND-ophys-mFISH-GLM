@@ -386,16 +386,16 @@ def get_pupil_area(bod, ophys_timestamps):
 #         2. Likely blinks are removed with a threshold set by run_params['eye_blink_z']
 #         3. After blink removal, a second transient step removes outliers with threshold run_params['eye_tranisent_threshold']
 #         4. After interpolating onto the ophys timestamps, Z-scores the eye_width and pupil_radius
-        
+
 #         Does not modifiy the original eye_tracking dataframe
-#     '''    
+#     '''
 
 #     # Set parameters for blink detection, and load data
 #     eye = bod.eye_tracking_table.copy(deep=True)
 
 #     # Compute pupil radius
 #     eye['pupil_radius'] = np.sqrt(eye['pupil_area']*(1/np.pi))
-    
+
 #     # Remove likely blinks and interpolate
 #     eye.loc[eye['likely_blink'],:] = np.nan
 #     eye = eye.interpolate()
@@ -412,5 +412,57 @@ def get_pupil_area(bod, ophys_timestamps):
 #                 ophys_eye[column+'_zscore'] = scipy.stats.zscore(ophys_eye[column],nan_policy='omit')
 #     print('                 : '+'Mean Centering')
 #     print('                 : '+'Standardized to unit variance')
-#     return ophys_eye 
+#     return ophys_eye
+
+
+# ── design matrix builder ─────────────────────────────────────────────────────
+
+def build_design_matrix(bod_list, kernel_dict, data_type):
+    """Build the design matrix and activity trace arrays across all planes.
+
+    Parameters
+    ----------
+    bod_list : list of BehaviorOphysDataset
+        One per imaging plane, already loaded with merged trial columns.
+    kernel_dict : dict
+        Raw kernel config (keys without leading '_'), e.g. from kernel_v01.json.
+    data_type : str
+        'events' or 'dff'.
+
+    Returns
+    -------
+    run_params : dict
+        Expanded kernel/dropout definitions.
+    design : DesignMatrix
+        The fitted DesignMatrix object (holds unstd_features etc.).
+    X : xr.DataArray
+        The (T × K) design matrix.
+    activity_trace : dict
+        Keys: activity_trace_arr, timestamps, time_bins, ophys_frame_rate.
+    """
+    import kernel_tools as ktools
+    import load_data as ld
+    from DesignMatrix import DesignMatrix
+
+    run_params = {'data_type': data_type}
+    at_list, rp_list = [], []
+    for bod in bod_list:
+        run_params = ktools.process_kernels(kernel_dict.copy(), run_params, bod)
+        at, run_params = ld.extract_and_annotate_ophys_plane(bod, run_params)
+        at_list.append(at)
+        rp_list.append(run_params)
+    run_params = rp_list[0]
+    run_params['input_kernel_dict'] = kernel_dict
+
+    at_arr = xr.concat([r['activity_trace_arr'] for r in at_list], dim='cell_roi_id')
+    activity_trace = {
+        'activity_trace_arr': at_arr,
+        'timestamps':         at_list[0]['timestamps'],
+        'time_bins':          at_list[0]['time_bins'],
+        'ophys_frame_rate':   at_list[0]['ophys_frame_rate'],
+    }
+    design = DesignMatrix(activity_trace['timestamps'], activity_trace['ophys_frame_rate'])
+    add_kernels(design, run_params, bod_list[-1], activity_trace)
+    X = design.get_X()
+    return run_params, design, X, activity_trace
 

@@ -2,48 +2,6 @@ import numpy as np
 from copy import copy
 
 
-def build_input_kernels(version):
-    assert isinstance(version, int)
-    if version == 0:
-        kernels = {
-            'intercept':    {'feature':'intercept',   'type':'continuous',    'length':0,     'offset':0,     'num_weights':None, 'dropout':True, 'text': 'constant value'},
-            'hits':         {'feature':'hit',         'type':'discrete',      'length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'lick to image change'},
-            'misses':       {'feature':'miss',        'type':'discrete',      'length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'no lick to image change'},
-            'passive_change':   {'feature':'passive_change','type':'discrete','length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'passive session image change'},
-            'omissions':        {'feature':'omissions',   'type':'discrete',  'length':1.5,      'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image was omitted'},
-            'each-image':   {'feature':'each-image',  'type':'discrete',      'length':0.75,  'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image presentation'},
-            'running':      {'feature':'running',     'type':'continuous',    'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'normalized running speed'},
-            'licks':        {'feature':'licks',       'type':'discrete',      'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'mouse lick'},            
-        }
-    elif version == 1:
-        kernels = {
-            'intercept':    {'feature':'intercept',   'type':'continuous',    'length':0,     'offset':0,     'num_weights':None, 'dropout':True, 'text': 'constant value'},
-            'hits':         {'feature':'hit',         'type':'discrete',      'length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'lick to image change'},
-            'misses':       {'feature':'miss',        'type':'discrete',      'length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'no lick to image change'},
-            'passive_change':   {'feature':'passive_change','type':'discrete','length':1.5,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'passive session image change'},
-            'omissions':        {'feature':'omissions',   'type':'discrete',  'length':1.5,      'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image was omitted'},
-            'each-image':   {'feature':'each-image',  'type':'discrete',      'length':0.75,  'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image presentation'},
-            'running':      {'feature':'running',     'type':'continuous',    'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'normalized running speed'},
-            'pupil':        {'feature':'pupil',       'type':'continuous',    'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'Z-scored pupil diameter'},
-            'licks':        {'feature':'licks',       'type':'discrete',      'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'mouse lick'},            
-        }
-    elif version == 2:
-        kernels = {
-            'intercept':    {'feature':'intercept',   'type':'continuous',    'length':0,     'offset':0,     'num_weights':None, 'dropout':True, 'text': 'constant value'},
-            'hits':         {'feature':'hit',         'type':'discrete',      'length':2.25,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'lick to image change'},
-            'misses':       {'feature':'miss',        'type':'discrete',      'length':2.25,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'no lick to image change'},
-            'passive_change':   {'feature':'passive_change','type':'discrete','length':2.25,   'offset':0,    'num_weights':None, 'dropout':True, 'text': 'passive session image change'},
-            'omissions':        {'feature':'omissions',   'type':'discrete',  'length':3,      'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image was omitted'},
-            'each-image':   {'feature':'each-image',  'type':'discrete',      'length':0.75,  'offset':0,     'num_weights':None, 'dropout':True, 'text': 'image presentation'},
-            'running':      {'feature':'running',     'type':'continuous',    'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'normalized running speed'},
-            'pupil':        {'feature':'pupil',       'type':'continuous',    'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'Z-scored pupil diameter'},
-            'licks':        {'feature':'licks',       'type':'discrete',      'length':2,     'offset':-1,    'num_weights':None, 'dropout':True, 'text': 'mouse lick'},            
-        }
-    else:
-        raise ValueError(f'Version {version} not implemented yet.')
-    return kernels
-
-
 def process_kernels(kernels, run_params, bod):
     kernels = replace_kernels(kernels, bod)
     dropouts = define_dropouts(kernels, run_params)
