@@ -8,7 +8,7 @@ ARG API_SECRET
 
 ARG GIT_ASKPASS
 ARG GIT_ACCESS_TOKEN
-COPY git-askpass /
+COPY git-ask-pass /
 
 
 # fonts for matplotlib figures
