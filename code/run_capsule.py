@@ -112,9 +112,12 @@ def run():
     parser.add_argument('--lambda_min',           type=float, default=1.0)
     parser.add_argument('--lambda_max',           type=float, default=10000.0)
     parser.add_argument('--min_activity_support', type=float, default=0.05)
+    parser.add_argument('--test', type=int, default=0, choices=[0, 1],
+                        help='Test mode (1): load one plane only, cap at 30 cells')
     parser.add_argument('--data_dir',    default=str(DATA_DIR))
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
     args = parser.parse_args()
+    test_mode = bool(args.test)
 
     start_time  = datetime.datetime.now()
     data_dir    = Path(args.data_dir)
@@ -158,6 +161,9 @@ def run():
     else:
         print('Loading planes...')
         bod_list = load_data.load_all_planes(proc_dir, raw_dir, eye_dir)
+        if test_mode:
+            bod_list = bod_list[:1]
+            print(f'TEST MODE: using 1 plane ({bod_list[0].metadata["ophys_plane_id"]})')
         print('Building design matrix...')
         run_params, design, X, activity_trace = dmtools.build_design_matrix(
             bod_list, kernel_dict, args.data_type)
@@ -194,6 +200,10 @@ def run():
     at_trim_filtered = gft.filter_activity_trace_matrix(
         at_trim, prop_support_threshold=args.min_activity_support)
     print(f'Cells after filtering: {at_trim_filtered.shape[1]} / {at_trim.shape[1]}')
+    if test_mode:
+        n_test = min(30, at_trim_filtered.shape[1])
+        at_trim_filtered = at_trim_filtered[:, :n_test]
+        print(f'TEST MODE: capped to {n_test} cells')
 
     stratified_list = gft.set_stratified_list(
         fit_params, X_load, unstd_features, use_indices, ophys_frame_rate)
@@ -233,6 +243,7 @@ def run():
     run_parameters = {
         'session_key':         session_key,
         'data_type':           args.data_type,
+        'test':                args.test,
         'kernels_config':      str(kernel_config_path),
         'kernel_version':      version,
         'kernels':             kernel_dict,
