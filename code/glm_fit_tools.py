@@ -195,38 +195,36 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             running_frames = np.where(sm_running_speed > fit_params['cv_stratify']['running_threshold'])[0]
             stationary_frames = np.setdiff1d(np.arange(X_trim.shape[0]), running_frames)
             stratified = [running_frames, stationary_frames]
+            if any(len(s) == 0 for s in stratified):
+                continue
             stratified_list.append(stratified)
         elif var == 'rolling_performance':
             keyword = 'hits'
             correct = get_feature_traces_from_X(X, use_indices, keyword)
-            if correct is not None:
-                # TODO: it assumes that hits is in the input weights. Consider when it's not.
-                # Also consider the similar case for other stratification variables.
-                # rolling sum
-                num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
-                rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
-                # binarization
-                performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
-                nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
-                stratified = [performing_frames, nonperforming_frames]
-                stratified_list.append(stratified)
-            else:
-                stratified_list.append([np.array([], dtype=int), np.array([], dtype=int)])
+            if correct is None:
+                continue
+            num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
+            rolling_performance = correct.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
+            performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
+            nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
+            stratified = [performing_frames, nonperforming_frames]
+            if any(len(s) == 0 for s in stratified):
+                continue
+            stratified_list.append(stratified)
         elif var == 'lick':
             if 'licks' not in unstd_features:
                 continue
             licks_trace = unstd_features['licks'][use_indices]
             assert len(licks_trace) == X_trim.shape[0]
             licks = xr.DataArray(licks_trace, dims='timestamps')
-            # add timestamps to licks
             licks['timestamps'] = X_trim['timestamps']
-            # rolling sum
             num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
             lick_freq = licks.rolling(timestamps=num_frames_one_min, center=True).sum().ffill(dim='timestamps').bfill(dim='timestamps')
-            # binarization
             licking_frames = np.where(lick_freq > fit_params['cv_stratify']['lick_threshold'])[0]
             nonlicking_frames = np.setdiff1d(np.arange(X_trim.shape[0]), licking_frames)
             stratified = [licking_frames, nonlicking_frames]
+            if any(len(s) == 0 for s in stratified):
+                continue
             stratified_list.append(stratified)
         elif var == 'pupil':
             keyword = 'pupil'
@@ -234,6 +232,8 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             if pupil_trace is None:
                 continue
             stratified = [np.where(pupil_trace > 0)[0], np.where(pupil_trace <= 0)[0]]
+            if any(len(s) == 0 for s in stratified):
+                continue
             stratified_list.append(stratified)
         else:
             print(f'{var} not implemented for stratification.\nImplemented feature keywords: {stratification_features}\nContinue...')

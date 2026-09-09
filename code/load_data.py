@@ -466,7 +466,7 @@ def check_same_number_per_stimulus(sets_of_stimulus_timestamps, run_params):
                 print('Stimuli with {} timestamps: {}'.format(u[index], c[index]))
                 if u[index] < mode:
                     overlaps += (mode-u[index])*c[index]
-            if ('image_kernel_overlap_tol' in run_params) & (run_params['image_kernel_overlap_tol'] > 0):
+            if run_params.get('image_kernel_overlap_tol', 0) > 0:
                 print('checking to see if image kernel overlap is within tolerance ({})'.format(run_params['image_kernel_overlap_tol']))
                 print('overlapping timestamps: {}'.format(overlaps))
                 if overlaps > run_params['image_kernel_overlap_tol']:
@@ -525,13 +525,16 @@ def is_plane_dir(p: Path) -> bool:
 
 def merge_trials(bod):
     """Add hit/miss columns to bod.stimulus_presentations (mutates in place)."""
-    stim   = bod.stimulus_presentations
-    trials = bod.trials
+    stim = bod.stimulus_presentations
     stim['is_change'] = stim.is_change.astype(bool)
     stim['hit']  = False
     stim['miss'] = False
-    stim.loc[stim.start_time.isin(trials.query('hit').change_time.values),  'hit']  = True
-    stim.loc[stim.start_time.isin(trials.query('miss').change_time.values), 'miss'] = True
+    try:
+        trials = bod.trials
+        stim.loc[stim.start_time.isin(trials.query('hit').change_time.values),  'hit']  = True
+        stim.loc[stim.start_time.isin(trials.query('miss').change_time.values), 'miss'] = True
+    except AttributeError:
+        pass  # passive / training sessions without go-nogo task have no trials
 
 
 def _load_plane(plane_dir, raw_dir, eye_dir):
