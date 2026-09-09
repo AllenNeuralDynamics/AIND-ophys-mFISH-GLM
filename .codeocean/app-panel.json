@@ -1,0 +1,16 @@
+{
+	"version": 1,
+	"parameters": [
+		{
+			"id": "nvtv1hP9N5OCM6ix",
+			"name": "test",
+			"description": "to run test",
+			"help_text": "Pass 1 to test. One plane, min(num_rois, 50)",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "0",
+			"minimum": 0,
+			"maximum": 1
+		}
+	]
+}
