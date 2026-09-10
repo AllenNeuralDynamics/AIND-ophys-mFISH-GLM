@@ -42,7 +42,8 @@ def _get_session_type(save_dir):
     return ''
 
 
-def save_qc_summary(session_key, data_type, results, run_params, save_dir):
+def save_qc_summary(session_key, data_type, results, run_params, save_dir,
+                    session_type=''):
     """3-panel QC figure: VE distribution, train vs test, kernel contributions."""
     ve_test  = np.asarray(results['var_explained_test_cv'])
     ve_train = np.asarray(results['var_explained_train_cv'])
@@ -51,8 +52,6 @@ def save_qc_summary(session_key, data_type, results, run_params, save_dir):
 
     ve_full_test  = np.nanmean(ve_test[:,  full_idx, :], axis=0)
     ve_full_train = np.nanmean(ve_train[:, full_idx, :], axis=0)
-
-    session_type = _get_session_type(save_dir)
 
     FS_TITLE  = 14
     FS_LABEL  = 12
@@ -148,7 +147,7 @@ def save_qc_summary(session_key, data_type, results, run_params, save_dir):
 
 
 def save_heatmap_figure(session_key, data_type, results, save_dir,
-                        proc_dir, raw_dir, eye_dir):
+                        proc_dir, raw_dir, eye_dir, session_type=''):
     """Depth-sorted heatmap (events / GLM / residual) + behavioral traces."""
     save_dir = Path(save_dir)
     proc_dir = Path(proc_dir)
@@ -303,9 +302,11 @@ def save_heatmap_figure(session_key, data_type, results, save_dir,
     ax.set_yticklabels(['0', str(lk_max)], fontsize=7)
     ax.set_xlabel('Time (min)', fontsize=8)
 
-    plt.suptitle(
-        f'{session_key} | {data_type} | z-scored per cell | sorted by imaging depth',
-        fontsize=10)
+    _hm_title = f'{session_key}'
+    if session_type:
+        _hm_title += f' | {session_type}'
+    _hm_title += f' | {data_type} | z-scored per cell | sorted by imaging depth'
+    plt.suptitle(_hm_title, fontsize=10)
     out = save_dir / f'heatmap_{session_key}_{data_type}.png'
     fig.savefig(out, dpi=120, bbox_inches='tight')
     plt.close(fig)

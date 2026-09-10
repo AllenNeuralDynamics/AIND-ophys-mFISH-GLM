@@ -192,6 +192,17 @@ def run():
     print(f'Proc    : {proc_dir.name}')
     print(f'Eye     : {eye_dir.name}')
 
+    _sess_json = raw_dir / 'session.json'
+    session_type = ''
+    if _sess_json.exists():
+        try:
+            with open(_sess_json) as _f:
+                session_type = json.load(_f).get('session_type', '')
+        except Exception:
+            pass
+    if session_type:
+        print(f'Session type: {session_type}')
+
     # 2. Load kernel config
     kernel_config_path = KERNEL_DIR / 'kernel_test.json' if test_mode \
         else Path(args.kernels_config)
@@ -294,9 +305,10 @@ def run():
         run_params_fig = json.load(f)
 
     print('Generating QC figures...')
-    save_qc_summary(session_key, args.data_type, results, run_params_fig, save_dir)
+    save_qc_summary(session_key, args.data_type, results, run_params_fig, save_dir,
+                    session_type=session_type)
     save_heatmap_figure(session_key, args.data_type, results, save_dir,
-                        proc_dir, raw_dir, eye_dir)
+                        proc_dir, raw_dir, eye_dir, session_type=session_type)
 
     print('Generating single-cell figures (top 10)...')
     glm_ca = GLMCellAnalysis(
