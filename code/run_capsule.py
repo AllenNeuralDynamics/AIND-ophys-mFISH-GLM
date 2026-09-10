@@ -67,9 +67,13 @@ def _one_task_mp(args):
     fold_idx, model_label = args
     d  = _WORKER_DATA
     fd = d['folds'][fold_idx]
+    X_tr = d['X_trim'][fd['train_frames'], :]
+    X_te = d['X_trim'][fd['test_frames'], :]
+    y_tr = d['at_filtered'][fd['train_frames'], :]
+    y_te = d['at_filtered'][fd['test_frames'], :]
     return fold_idx, model_label, gft.collect_model_results(
         d['run_params'], d['fit_params'],
-        fd['X_tr'], fd['X_te'], fd['y_tr'], fd['y_te'],
+        X_tr, X_te, y_tr, y_te,
         fd['nested'], model_label)
 
 
@@ -86,19 +90,25 @@ def _run_glm_flat(run_params, fit_params, X_trim, at_filtered,
     models  = list(run_params['dropouts'].keys())
     n_folds = fit_params['cv_fold']
 
-    # Precompute and load all fold splits into the global before forking
+    # Precompute fold indices before forking; workers slice shared arrays per task
+    X_trim = X_trim.load()
+    at_filtered = at_filtered.load()
     folds = {}
     for fi in range(n_folds):
         train_frames, test_frames, nested = gft.get_train_test_inds(
             fi, fit_params, stratified_frames, cv_inds_stratified)
         folds[fi] = dict(
-            X_tr=X_trim[train_frames, :].load(),
-            X_te=X_trim[test_frames, :].load(),
-            y_tr=at_filtered[train_frames, :].load(),
-            y_te=at_filtered[test_frames, :].load(),
+            train_frames=train_frames,
+            test_frames=test_frames,
             nested=nested,
         )
-    _WORKER_DATA.update(run_params=run_params, fit_params=fit_params, folds=folds)
+    _WORKER_DATA.update(
+        run_params=run_params,
+        fit_params=fit_params,
+        X_trim=X_trim,
+        at_filtered=at_filtered,
+        folds=folds,
+    )
 
     tasks     = [(fi, ml) for fi in range(n_folds) for ml in models]
     n_workers = n_workers or min(len(tasks), os.cpu_count() or 16)
