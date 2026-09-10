@@ -136,8 +136,11 @@ def write_metadata_files(
 
     # ── data_description.json ─────────────────────────────────────────────────
     source_asset_name = proc_dir.name          # e.g. 'multiplane-ophys_800792_…_processed_…'
-    subject_id        = session_name.split('_')[1]
-    capture_name      = save_dir.name          # e.g. '800792_2025-08-18_glm_v01'
+    _parts            = session_name.split('_')
+    subject_id        = _parts[1]
+    # Capture name is just subject_date; process_name='glm' appended by from_data_description.
+    # Kernel version is recorded in run_params.json — no need to embed it in the asset name.
+    capture_name      = f'{_parts[1]}_{_parts[2]}'   # e.g. '800792_2025-08-18'
 
     dd_path = proc_dir / 'data_description.json'
     if dd_path.exists():
