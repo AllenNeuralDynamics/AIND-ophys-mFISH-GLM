@@ -54,6 +54,7 @@ import glm_fit_tools as gft
 import design_matrix_tools as dmtools
 import load_data
 from qc_figures import save_qc_summary, save_heatmap_figure
+from glm_cell_analysis import GLMCellAnalysis
 from aind_metadata_utils import write_metadata_files
 
 
@@ -241,6 +242,15 @@ def run():
     save_qc_summary(session_key, args.data_type, results, run_params_fig, save_dir)
     save_heatmap_figure(session_key, args.data_type, results, save_dir,
                         proc_dir, raw_dir, eye_dir)
+
+    print('Generating single-cell figures (top 10)...')
+    glm_ca = GLMCellAnalysis(
+        results_path=save_dir,
+        session_key=session_key,
+        data_type=args.data_type,
+        version=version,
+    )
+    glm_ca.save_top_cells(n=10, out_dir=save_dir / 'top_cells')
 
     # 7. Metadata
     end_time = datetime.datetime.now()
