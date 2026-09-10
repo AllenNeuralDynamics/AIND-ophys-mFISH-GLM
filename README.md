@@ -26,6 +26,7 @@ All three directories are discovered automatically; no path arguments are requir
 | `glm_results_v{version:02}_{session_key}_{data_type}.npy` | CV weights, VE, lambdas |
 | `qc_summary_{session_key}_{data_type}.png` | VE distribution, train/test scatter, kernel contributions |
 | `heatmap_{session_key}_{data_type}.png` | Depth-sorted z-scored heatmap + behavioral traces |
+| `top_cells/rank{N:02d}_{cell_id}_ve{ve:.3f}.png` | Single-cell figures for top 10 cells by test-set VE (see below) |
 | `processing.json` | AIND data schema `Processing` record |
 | `data_description.json` | AIND `DerivedDataDescription` derived from processed folder |
 
@@ -95,8 +96,48 @@ Set `--test 1` to run a fast smoke-test:
 | `glm_fit_tools.py` | Ridge GLM fitting, CV, results I/O |
 | `DesignMatrix.py` | Design matrix class |
 | `qc_figures.py` | QC summary figure and depth-sorted heatmap |
+| `glm_cell_analysis.py` | Per-cell QC figures — `GLMCellAnalysis` class (see below) |
 | `aind_metadata_utils.py` | AIND-schema `processing.json` and `data_description.json` |
 | `kernel_json_files/` | Versioned kernel configuration files |
+
+## Single-cell QC figures (`glm_cell_analysis.py`)
+
+After fitting, `run_capsule.py` automatically generates one combined figure per cell for the top 10 cells ranked by test-set variance explained, saving them to `top_cells/` inside the results directory.
+
+Each figure has two panels:
+
+**Panel 1 — full traces + zoom windows**
+- Three stacked traces (actual / model / residual) spanning the whole session.
+- Three zoomed 60 s windows selected from the first, middle, and last thirds of the session (highest-variance window per third); colored boxes in the full trace mark each window and dashed lines connect them to the zoom subplots.
+
+**Panel 2 — kernels and PSTHs**
+- *Images (top):* kernel weight time course (navy) and mean response PSTH (black = actual, blue = model) for each image identity, with matched y-limits across all image kernels and across all image PSTHs.
+- *Omissions / Hits / Misses / Behavioral (bottom):* same layout for omission, hit, and miss kernels (each with a PSTH), plus running-speed, pupil, and lick kernels (kernel only — no PSTH). All kernel y-limits unified across the entire panel; all PSTH y-limits unified across the entire panel.
+
+The class can also be used standalone:
+
+```python
+from glm_cell_analysis import GLMCellAnalysis
+
+glm = GLMCellAnalysis(
+    results_path='/results/800792_2025-08-14_glm_v01',
+    session_key='800792_2025-08-14',
+    data_type='events',   # or 'dff'
+    version=1,
+)
+glm.save_top_cells(n=10)                        # → results_path/top_cells/
+glm.save_cell_figure(cell_idx=0, out_path='cell0.png')  # single cell
+```
+
+Or from the command line:
+
+```bash
+python glm_cell_analysis.py \
+    --results_path /results/800792_2025-08-14_glm_v01 \
+    --session_key  800792_2025-08-14 \
+    --data_type    events \
+    --n            10
+```
 
 ## Dependencies
 

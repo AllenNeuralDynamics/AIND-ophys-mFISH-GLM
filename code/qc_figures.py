@@ -27,6 +27,21 @@ def _zscore_cols(M):
     return (M - mu) / sig
 
 
+def _get_session_type(save_dir):
+    """Read session_type from session.json next to save_dir."""
+    save_dir = Path(save_dir)
+    session_json = save_dir.parent / 'session.json'
+    if not session_json.exists():
+        session_json = next(save_dir.rglob('session.json'), None)
+    if session_json and session_json.exists():
+        try:
+            with open(session_json) as f:
+                return json.load(f).get('session_type', '')
+        except Exception as e:
+            print(f'  Warning: could not read session.json ({e})')
+    return ''
+
+
 def save_qc_summary(session_key, data_type, results, run_params, save_dir):
     """3-panel QC figure: VE distribution, train vs test, kernel contributions."""
     ve_test  = np.asarray(results['var_explained_test_cv'])
@@ -37,48 +52,95 @@ def save_qc_summary(session_key, data_type, results, run_params, save_dir):
     ve_full_test  = np.nanmean(ve_test[:,  full_idx, :], axis=0)
     ve_full_train = np.nanmean(ve_train[:, full_idx, :], axis=0)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    session_type = _get_session_type(save_dir)
 
-    # 1. VE distribution
+    FS_TITLE  = 14
+    FS_LABEL  = 12
+    FS_TICK   = 11
+    FS_LEGEND = 11
+
+    fig, axes = plt.subplots(1, 5, figsize=(25, 5))
+
+    # 1. VE distribution (histogram)
     ax = axes[0]
     ax.hist(ve_full_test, bins=50, color='steelblue', edgecolor='white', linewidth=0.3)
     ax.axvline(np.nanmedian(ve_full_test), color='orange', lw=1.5, ls='--',
                label=f'median={np.nanmedian(ve_full_test):.3f}')
-    ax.set_xlabel('Variance explained (test)')
-    ax.set_ylabel('Number of cells')
-    ax.set_title('Full model VE')
-    ax.legend(fontsize=8)
+    ax.set_xlabel('Variance explained (test)', fontsize=FS_LABEL)
+    ax.set_ylabel('Number of cells', fontsize=FS_LABEL)
+    ax.set_title('Full model VE', fontsize=FS_TITLE)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.legend(fontsize=FS_LEGEND)
+    ax.set_box_aspect(1)
 
-    # 2. Train vs test scatter
+    # 2. CDF of test VE
     ax = axes[1]
+    sorted_ve = np.sort(ve_full_test[np.isfinite(ve_full_test)])
+    cdf       = np.arange(1, len(sorted_ve) + 1) / len(sorted_ve)
+    ax.plot(sorted_ve, cdf, color='steelblue', lw=1.5)
+    ax.axvline(np.nanmedian(ve_full_test), color='orange', lw=1.5, ls='--',
+               label=f'median={np.nanmedian(ve_full_test):.3f}')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel('Variance explained (test)', fontsize=FS_LABEL)
+    ax.set_ylabel('Cumulative fraction', fontsize=FS_LABEL)
+    ax.set_title('CDF of VE', fontsize=FS_TITLE)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.legend(fontsize=FS_LEGEND)
+    ax.set_box_aspect(1)
+
+    # 3. Train vs test scatter
+    ax = axes[2]
     ax.scatter(ve_full_train, ve_full_test, s=4, alpha=0.4, color='steelblue')
-    lo = min(ve_full_train.min(), ve_full_test.min()) - 0.01
+    lo = 0
     hi = max(ve_full_train.max(), ve_full_test.max()) + 0.01
     ax.plot([lo, hi], [lo, hi], 'r--', lw=1)
-    ax.set_xlabel('VE train')
-    ax.set_ylabel('VE test')
-    ax.set_title('Train vs Test VE')
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_xlabel('VE train', fontsize=FS_LABEL)
+    ax.set_ylabel('VE test', fontsize=FS_LABEL)
+    ax.set_title('Train vs Test VE', fontsize=FS_TITLE)
+    ax.tick_params(labelsize=FS_TICK)
+    ax.set_box_aspect(1)
 
-    # 3. Kernel dropout contributions
-    cf_mean, k_labels = [], []
+    # 4 & 5. Kernel contributions — separate unique (dropout) from absolute (single)
+    # Exclude 'intercept' from unique contributions (not meaningful to drop it)
+    unique_vals, unique_labels = [], []
+    single_vals, single_labels = [], []
     for di, label in enumerate(dropout_labels):
-        if label == 'Full':
+        if label in ('Full', 'intercept'):
             continue
         ve_without = np.nanmean(ve_test[:, di, :], axis=0)
-        cf_mean.append(float(np.nanmean(np.clip(ve_full_test - ve_without, 0, None))))
-        k_labels.append(label)
+        val = float(np.nanmean(np.clip(ve_full_test - ve_without, 0, None)))
+        if label.startswith('single-'):
+            single_vals.append(val)
+            single_labels.append(label[len('single-'):])
+        else:
+            unique_vals.append(val)
+            unique_labels.append(label)
 
-    ax = axes[2]
-    y_pos = np.arange(len(k_labels))
-    ax.barh(y_pos, cf_mean, color='steelblue', edgecolor='white', height=0.7)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(k_labels, fontsize=8)
-    ax.set_xlabel('Mean unique VE')
-    ax.set_title('Kernel contributions')
-    ax.invert_yaxis()
+    def _barh(ax, vals, labels, xlabel, title, color):
+        y_pos = np.arange(len(labels))
+        ax.barh(y_pos, vals, color=color, edgecolor='white', height=0.7)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=FS_TICK)
+        ax.set_xlabel(xlabel, fontsize=FS_LABEL)
+        ax.set_title(title, fontsize=FS_TITLE)
+        ax.tick_params(axis='x', labelsize=FS_TICK)
+        ax.invert_yaxis()
+        ax.set_box_aspect(1)
 
-    plt.suptitle(f'{session_key} | {data_type}', fontsize=10)
-    plt.tight_layout()
+    _barh(axes[3], unique_vals, unique_labels,
+          'Mean unique VE\n(full − dropout)', 'Unique contributions', 'steelblue')
+    _barh(axes[4], single_vals, single_labels,
+          'Mean VE (kernel alone)\n(intercept + kernel only)', 'Absolute contributions', 'coral')
+
+    title_parts = [session_key]
+    if session_type:
+        title_parts.append(session_type)
+    title_parts.append(data_type)
+    plt.suptitle(' | '.join(title_parts), fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
     out = Path(save_dir) / f'qc_summary_{session_key}_{data_type}.png'
     fig.savefig(out, dpi=120, bbox_inches='tight')
     plt.close(fig)
