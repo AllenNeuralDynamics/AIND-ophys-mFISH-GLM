@@ -27,10 +27,8 @@ All three directories are discovered automatically; no path arguments are requir
 | `qc_summary_{session_key}_{data_type}.png` | VE distribution, train/test scatter, kernel contributions |
 | `heatmap_{session_key}_{data_type}.png` | Depth-sorted z-scored heatmap + behavioral traces |
 | `top_cells/rank{N:02d}_{cell_id}_ve{ve:.3f}.png` | Single-cell figures for top 10 cells by test-set VE (see below) |
-| `processing.json` | AIND data schema `Processing` record |
-| `data_description.json` | AIND `DerivedDataDescription` derived from processed folder |
 
-Core JSON files (`session.json`, `subject.json`, `procedures.json`, `rig.json`) are also copied to `/results/`.
+Core JSON files (`data_description.json`, `processing.json`, `session.json`, `subject.json`, `procedures.json`, `rig.json`) are also copied to `/results/`.
 
 ## Parameters
 
