@@ -369,7 +369,7 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
     # Check if it was already interpolated
     if np.array_equal(new_timestamps, activity_trace['timestamps']):
         print('Already interpolated onto stimulus aligned timestamps')
-        return fit, run_params
+        return activity_trace, run_params
     else:
         # Setup new variables 
         num_cells = np.size(activity_trace['activity_trace_arr'], 1)
