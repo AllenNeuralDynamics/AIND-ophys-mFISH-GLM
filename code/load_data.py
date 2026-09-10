@@ -442,7 +442,7 @@ def check_same_number_per_stimulus(sets_of_stimulus_timestamps, run_params):
     """
     # Check to make sure we always have the same number of timestamps per stimulus
     lens = [len(x) for x in sets_of_stimulus_timestamps]
-    mode = scipy.stats.mode(lens)[0]
+    mode = int(np.asarray(scipy.stats.mode(lens).mode).item())
     if len(np.unique(lens)) > 1:
         u,c = np.unique(lens, return_counts=True)
         for index, val in enumerate(u):
@@ -451,9 +451,7 @@ def check_same_number_per_stimulus(sets_of_stimulus_timestamps, run_params):
         print('   I will truncate extra timestamps so that all stimuli have the same number of following timestamps')
     
         # Determine how many timestamps each stimuli most commonly has and trim off the extra
-        sets_of_stimulus_timestamps = [x[0:mode] for x in sets_of_stimulus_timestamps]
-
-        # Check again to make sure we always have the same number of timestamps
+        sets_of_stimulus_timestamps = [x[:mode] for x in sets_of_stimulus_timestamps]
         # Note this can still fail if the stimulus duration is less than 750
         lens = [len(x) for x in sets_of_stimulus_timestamps]
         if len(np.unique(lens)) > 1:
