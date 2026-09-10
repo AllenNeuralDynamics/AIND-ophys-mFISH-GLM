@@ -58,45 +58,89 @@ from glm_cell_analysis import GLMCellAnalysis
 from aind_metadata_utils import write_metadata_files
 
 
-# ── fork-based parallel GLM fit (replaces ray) ───────────────────────────────
+# ── fork-based parallel GLM fit ───────────────────────────────────────────────
 _WORKER_DATA: dict = {}
 
 
-def _one_model_mp(model_label):
-    d = _WORKER_DATA
-    return gft.collect_model_results(
+def _one_task_mp(args):
+    """Worker: run one (fold_idx, model_label) task using fork-shared data."""
+    fold_idx, model_label = args
+    d  = _WORKER_DATA
+    fd = d['folds'][fold_idx]
+    return fold_idx, model_label, gft.collect_model_results(
         d['run_params'], d['fit_params'],
-        d['X_tr'], d['X_te'], d['y_tr'], d['y_te'],
-        d['nested'], model_label)
+        fd['X_tr'], fd['X_te'], fd['y_tr'], fd['y_te'],
+        fd['nested'], model_label)
 
 
-def _collect_fold_results_mp(run_params, fit_params,
-                              X_tr, X_te, y_tr, y_te,
-                              nested, num_cores=None):
-    """Drop-in for gft.collect_fold_results_parallel using fork + Pool."""
+def _run_glm_flat(run_params, fit_params, X_trim, at_filtered,
+                  stratified_frames, cv_inds_stratified, n_workers=None):
+    """Flat (fold × model) parallelism — one persistent pool, all tasks at once.
+
+    Eliminates per-fold pool create/destroy overhead and idle time between fold
+    batches. All 5×M tasks are queued upfront; workers pick tasks as they finish.
+    Fold data is stored in the fork-shared global before the pool is created, so
+    no serialization cost for large arrays.
+    """
     global _WORKER_DATA
-    X_tr.load(); X_te.load(); y_tr.load(); y_te.load()
-    _WORKER_DATA.update(
-        run_params=run_params, fit_params=fit_params,
-        X_tr=X_tr, X_te=X_te, y_tr=y_tr, y_te=y_te, nested=nested,
-    )
-    models    = list(run_params['dropouts'].keys())
-    n_workers = num_cores or min(len(models), os.cpu_count() or 16)
+    models  = list(run_params['dropouts'].keys())
+    n_folds = fit_params['cv_fold']
+
+    # Precompute and load all fold splits into the global before forking
+    folds = {}
+    for fi in range(n_folds):
+        train_frames, test_frames, nested = gft.get_train_test_inds(
+            fi, fit_params, stratified_frames, cv_inds_stratified)
+        folds[fi] = dict(
+            X_tr=X_trim[train_frames, :].load(),
+            X_te=X_trim[test_frames, :].load(),
+            y_tr=at_filtered[train_frames, :].load(),
+            y_te=at_filtered[test_frames, :].load(),
+            nested=nested,
+        )
+    _WORKER_DATA.update(run_params=run_params, fit_params=fit_params, folds=folds)
+
+    tasks     = [(fi, ml) for fi in range(n_folds) for ml in models]
+    n_workers = n_workers or min(len(tasks), os.cpu_count() or 16)
+
     ctx = multiprocessing.get_context('fork')
     with ctx.Pool(processes=n_workers) as pool:
-        results = pool.map(_one_model_mp, models)
+        raw = pool.map(_one_task_mp, tasks)   # list of (fold_idx, model_label, result_tuple)
 
-    lam_f = W_f = vetr_f = vete_f = ver_f = None
-    for mi, (lam, W, ve_tr, ve_te, ve_r) in enumerate(results):
-        if mi == 0:
-            lam_f, W_f, vetr_f, vete_f, ver_f = lam, W, ve_tr, ve_te, ve_r
+    # Aggregate into (fold, model) structure
+    by_fold = {fi: {} for fi in range(n_folds)}
+    for fold_idx, model_label, result in raw:
+        by_fold[fold_idx][model_label] = result
+
+    lam_cv = W_cv = vetr_cv = vete_cv = ver_cv = None
+    for fi in range(n_folds):
+        lam_f = W_f = vetr_f = vete_f = ver_f = None
+        for mi, ml in enumerate(models):
+            lam, W, ve_tr, ve_te, ve_r = by_fold[fi][ml]
+            if mi == 0:
+                lam_f, W_f, vetr_f, vete_f, ver_f = lam, W, ve_tr, ve_te, ve_r
+            else:
+                lam_f  = xr.concat([lam_f,  lam],   dim='model')
+                W_f    = xr.concat([W_f,    W],      dim='model')
+                vetr_f = xr.concat([vetr_f, ve_tr],  dim='model')
+                vete_f = xr.concat([vete_f, ve_te],  dim='model')
+                ver_f  = xr.concat([ver_f,  ve_r],   dim='model')
+        lam_f  = lam_f.expand_dims(test_fold_ind=[fi])
+        W_f    = W_f.expand_dims(test_fold_ind=[fi])
+        vetr_f = vetr_f.expand_dims(test_fold_ind=[fi])
+        vete_f = vete_f.expand_dims(test_fold_ind=[fi])
+        ver_f  = ver_f.expand_dims(test_fold_ind=[fi])
+        if fi == 0:
+            lam_cv, W_cv, vetr_cv, vete_cv, ver_cv = lam_f, W_f, vetr_f, vete_f, ver_f
         else:
-            lam_f  = xr.concat([lam_f,  lam],   dim='model')
-            W_f    = xr.concat([W_f,    W],      dim='model')
-            vetr_f = xr.concat([vetr_f, ve_tr],  dim='model')
-            vete_f = xr.concat([vete_f, ve_te],  dim='model')
-            ver_f  = xr.concat([ver_f,  ve_r],   dim='model')
-    return lam_f, W_f, vetr_f, vete_f, ver_f
+            lam_cv  = xr.concat([lam_cv,  lam_f],  dim='test_fold_ind')
+            W_cv    = xr.concat([W_cv,    W_f],    dim='test_fold_ind')
+            vetr_cv = xr.concat([vetr_cv, vetr_f], dim='test_fold_ind')
+            vete_cv = xr.concat([vete_cv, vete_f], dim='test_fold_ind')
+            ver_cv  = xr.concat([ver_cv,  ver_f],  dim='test_fold_ind')
+
+    gft.check_nan_weights(W_cv, run_params)
+    return lam_cv, W_cv, vetr_cv, vete_cv, ver_cv
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -190,8 +234,6 @@ def run():
         print('Design matrix artifacts saved.')
 
     # 5. Configure and run GLM
-    gft.collect_fold_results_parallel = _collect_fold_results_mp
-
     fit_params = gft.default_fit_params()
     fit_params['cv_fold']        = args.cv_folds
     fit_params['cv_nested_fold'] = args.cv_nested_folds
@@ -218,9 +260,9 @@ def run():
     stratified_frames, cv_inds_stratified = gft.get_stratified_folds(fit_params, stratified_list)
 
     print(f'Fitting GLM ({fit_params["cv_fold"]}-fold CV)...')
-    lambdas_cv, W_cv, ve_train_cv, ve_test_cv, ve_ratio_cv = gft.collect_session_results(
+    lambdas_cv, W_cv, ve_train_cv, ve_test_cv, ve_ratio_cv = _run_glm_flat(
         run_params_load, fit_params, X_trim, at_trim_filtered,
-        stratified_frames, cv_inds_stratified, parallel=True)
+        stratified_frames, cv_inds_stratified)
     print('GLM fit complete.')
 
     var_explained_mean = gft.get_full_session_var_explained_from_mean_model(
