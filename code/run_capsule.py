@@ -116,6 +116,8 @@ def run():
 
     parser.add_argument('--test', type=int, default=0, choices=[0, 1],
                         help='Test mode (1): load one plane only, cap at 30 cells')
+    parser.add_argument('--random_seed', type=int, default=42,
+                        help='Random seed for CV fold assignment (ensures reproducible fold splits)')
 
     parser.add_argument('--data_dir',    default=str(DATA_DIR))
     parser.add_argument('--results_dir', default=str(RESULTS_DIR))
@@ -195,6 +197,7 @@ def run():
     fit_params['cv_nested_fold'] = args.cv_nested_folds
     fit_params['L2_grid_num']    = args.n_lambdas
     fit_params['L2_grid_range']  = [args.lambda_min, args.lambda_max]
+    fit_params['rng_seed']       = args.random_seed
 
     X_load, at_arr, at_info, run_params_load, unstd_features, use_indices = \
         gft.load_data(session_key, args.data_type, version, load_path=results_dir)
@@ -266,7 +269,12 @@ def run():
         'n_lambdas':           args.n_lambdas,
         'lambda_min':          args.lambda_min,
         'lambda_max':          args.lambda_max,
+        'lambda_grid_type':    fit_params['L2_grid_type'],
         'min_activity_support': args.min_activity_support,
+        'random_seed':         args.random_seed,
+        'cv_stratify':         fit_params['cv_stratify'],
+        'ElasticNet':          fit_params['ElasticNet'],
+        'ElasticNet_alpha':    fit_params['ElasticNet_alpha'],
     }
     write_metadata_files(
         session_name=session_name,

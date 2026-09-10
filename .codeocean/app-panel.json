@@ -91,6 +91,16 @@
 			"default_value": "0",
 			"minimum": 0,
 			"maximum": 1
+		},
+		{
+			"id": "rNgS3eEdK1mZqPwX",
+			"name": "random_seed",
+			"param_name": "random_seed",
+			"help_text": "Random seed for CV fold assignment (ensures reproducible fold splits)",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "42",
+			"minimum": 0
 		}
 	]
 }

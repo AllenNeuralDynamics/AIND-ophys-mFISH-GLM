@@ -265,6 +265,7 @@ def get_stratified_folds(fit_params, stratified_list):
     '''
     cv_fold = fit_params['cv_fold']
     cv_nested_fold = fit_params['cv_nested_fold']
+    rng = np.random.default_rng(fit_params.get('rng_seed', 42))
 
     # collect unique sets across all stratification variables
     unique_sets = []
@@ -279,7 +280,7 @@ def get_stratified_folds(fit_params, stratified_list):
     total_folds = cv_fold * cv_nested_fold
     stratify_folds_each_set = []
     for us in unique_sets:
-        np.random.shuffle(us)
+        rng.shuffle(us)
         stratify_folds_each_set.append(np.array_split(us, total_folds))
 
     # Combine each folds in each set to generate stratified folds
@@ -288,10 +289,10 @@ def get_stratified_folds(fit_params, stratified_list):
 
     # shuffle and split stratified folds into cv_fold
     # To randomly distribute total number of frames
-    stratified_frames = [stratified_frames[i] for i in np.random.permutation(np.arange(total_folds))]
+    stratified_frames = [stratified_frames[i] for i in rng.permutation(total_folds)]
     cv_inds_stratified = np.array_split(np.arange(total_folds), cv_fold)
-    assert np.all([len(cv_inds_stratified[i]) == cv_nested_fold for i in range(cv_fold)])    
-    
+    assert np.all([len(cv_inds_stratified[i]) == cv_nested_fold for i in range(cv_fold)])
+
     return stratified_frames, cv_inds_stratified
 
 
