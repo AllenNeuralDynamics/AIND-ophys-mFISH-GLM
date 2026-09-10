@@ -358,35 +358,35 @@ def fit(y, X):
     return W
 
 
-def fit_regularized(y, X, lam):
+def fit_regularized(y, X, lam, XtX=None, XtY=None):
     '''
-    Analytical OLS solution with added L2 regularization penalty. 
+    Analytical OLS solution with added L2 regularization penalty.
 
-    y: xr DataArray shape (n_timestamps * n_cells)
-    X: xr DataArray shape (n_timestamps * n_kernel_params)
-    lam (float): Strength of L2 regularization per cell (hyperparameter to tune)
+    y: xr DataArray shape (n_timestamps, n_cells)
+    X: xr DataArray shape (n_timestamps, n_kernel_params)
+    lam (float): Strength of L2 regularization per cell
+    XtX: optional precomputed X.T @ X (K×K) — avoids recomputation across lambda sweeps
+    XtY: optional precomputed X.T @ y (K×N) — avoids recomputation across lambda sweeps
 
-    Returns: XArray
+    Returns: XArray (weights × cell_roi_id)
     '''
-    assert len(y.shape) == 2 # 2 dimensional, even if there is only one cell
-    
-    # Compute the weights
+    assert len(y.shape) == 2
+
     if lam == 0:
         W = fit(y, X)
     else:
-        W = np.dot(np.linalg.inv(np.dot(X.T.values, X.values) + lam * np.eye(X.shape[-1])),
-               np.dot(X.T.values, y.values))
-    # if len(W.shape) == 1: # in case of single neuron
-    #     W = W[:, None]
+        if XtX is None:
+            XtX = X.values.T @ X.values
+        if XtY is None:
+            XtY = X.values.T @ y.values
+        W = np.linalg.solve(XtX + lam * np.eye(XtX.shape[0]), XtY)
 
-    # Make xarray
     cellids = y['cell_roi_id'].values
-    W_xarray= xr.DataArray(
-            W, 
-            dims =('weights','cell_roi_id'), 
-            coords = {  'weights':X.weights.values, 
-                        'cell_roi_id':cellids}
-            )
+    W_xarray = xr.DataArray(
+        W,
+        dims=('weights', 'cell_roi_id'),
+        coords={'weights': X.weights.values, 'cell_roi_id': cellids}
+    )
     return W_xarray
 
 
@@ -435,46 +435,74 @@ def compute_adjusted_variance_explained(y, W, X, mask):
 ##############################################################################################################
 ## Calculating lambdas for ridge regression
 def collect_var_explained_across_lambdas_and_nested_folds(X, y, nested_fold_inds, fit_params):
-    ''' Collect variance ratio across lambdas and nested folds.
-    
+    ''' Collect variance ratio across lambdas and nested folds using SVD-based vectorized ridge.
+
+    Precomputes the economy SVD of each inner training fold once, then evaluates all
+    lambda values for all cells simultaneously via elementwise scaling — no per-lambda
+    linear solves, no per-cell loops.
+
     Parameters
     ----------
     X : xr.DataArray
-        Design matrix
+        Design matrix (timestamps × weights)
     y : xr.DataArray
-        activity_trace matrix
+        Activity trace matrix (timestamps × cell_roi_id)
     nested_fold_inds : list
-        List of indices for nested cross-validation
+        List of index arrays for each inner fold
     fit_params : dict
-        Fitting parameters
-        
+        Fitting parameters (L2_grid_range, L2_grid_num, cv_nested_fold)
+
     Returns
     -------
     var_explained_xr_collected : xr.DataArray
-        Variance ratio across lambdas and nested folds
+        VE with dims (lam, cell_roi_id, nested_fold_ind)
     '''
     assert fit_params['cv_nested_fold'] == len(nested_fold_inds)
-    
+
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
+    n_inner  = fit_params['cv_nested_fold']
+    A        = len(test_lams)
+    Xv       = X.values           # (T, K)
+    yv       = y.values           # (T, N)
+    N        = yv.shape[1]
+    cell_ids = y.cell_roi_id.values
 
-    var_explained_xr_collected = None  # Start with no data
-    for nfi in range(fit_params['cv_nested_fold']):
-        nested_train_inds = np.concatenate([nested_fold_inds[i] for i in range(len(nested_fold_inds)) if i != nfi])
-        nested_test_inds = nested_fold_inds[nfi]
-        X_train = X[nested_train_inds, :]
-        X_test = X[nested_test_inds, :]
-        y_train = y[nested_train_inds, :]
-        y_test = y[nested_test_inds, :]
-        assert X_train.shape[0] + X_test.shape[0] == X.shape[0]
+    ve_arr = np.full((A, N, n_inner), np.nan, dtype=np.float64)
 
-        var_explained_xr, _ = get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_lams)
-        var_explained_xr = var_explained_xr.expand_dims(nested_fold_ind=[nfi])
+    for nfi in range(n_inner):
+        tr_inds = np.concatenate([nested_fold_inds[i] for i in range(n_inner) if i != nfi])
+        te_inds = nested_fold_inds[nfi]
 
-        if var_explained_xr_collected is None:
-            var_explained_xr_collected = var_explained_xr
-        else:
-            var_explained_xr_collected = xr.concat([var_explained_xr_collected, var_explained_xr], dim="nested_fold_ind")
-        
+        Xtr = Xv[tr_inds]    # (n_train, K)
+        Xte = Xv[te_inds]    # (n_test,  K)
+        ytr = yv[tr_inds]    # (n_train, N)
+        yte = yv[te_inds]    # (n_test,  N)
+
+        # Economy SVD of training X — one decomposition per inner fold
+        U, S, Vt = np.linalg.svd(Xtr, full_matrices=False)   # U:(n_tr,r) S:(r,) Vt:(r,K)
+        V   = Vt.T                                            # (K, r)
+        T_  = U.T @ ytr                                       # (r, N)  precomputed
+        XV  = Xte @ V                                         # (n_te, r)
+
+        var_yte = yte.var(axis=0)       # (N,) total variance per cell, ddof=0
+        var_yte[var_yte == 0] = np.nan  # guard against zero-variance cells
+
+        for ai, lam in enumerate(test_lams):
+            # Ridge scaling: d_i = S_i / (S_i^2 + lam)
+            d    = S / (S**2 + lam)                  # (r,)
+            Yhat = XV @ (d[:, None] * T_)            # (n_te, N)  all cells at once
+            var_resid = (yte - Yhat).var(axis=0)     # (N,)
+            ve_arr[ai, :, nfi] = (var_yte - var_resid) / var_yte
+
+    var_explained_xr_collected = xr.DataArray(
+        ve_arr,
+        dims=('lam', 'cell_roi_id', 'nested_fold_ind'),
+        coords={
+            'lam':             test_lams,
+            'cell_roi_id':     cell_ids,
+            'nested_fold_ind': np.arange(n_inner),
+        }
+    )
     return var_explained_xr_collected
 
 
@@ -501,12 +529,16 @@ def get_var_explained_xr_across_lambdas(X_train, X_test, y_train, y_test, test_l
     W_all : xr.DataArray
         Weights across lambdas
     '''
+    # Precompute X^T X and X^T y once — reused across all lambda values
+    XtX = X_train.values.T @ X_train.values
+    XtY = X_train.values.T @ y_train.values
+
     var_explained_xr = None  # Start with no data
     W_all = None
 
     for lam in test_lams:
-        # Fit the regularized model
-        W = fit_regularized(y_train, X_train, lam)
+        # Fit the regularized model (XtX/XtY already computed)
+        W = fit_regularized(y_train, X_train, lam, XtX=XtX, XtY=XtY)
         
         # Compute the variance ratio
         var_explained = compute_variance_explained(y_test, W, X_test)
@@ -797,16 +829,20 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     best_lam_inds = var_explained_xr_collected.mean(dim="nested_fold_ind").argmax(dim="lam")
     lambdas = test_lams[best_lam_inds]
     
-    # Train using the lambda
+    # Train using per-cell best lambda — SVD-based vectorized solve (no loops over cells or lambdas)
     assert len(lambdas) == len(y_train_outer.cell_roi_id)
-    num_cell = len(lambdas)
-    W_model = None
-    for ci in range(num_cell):
-        W_cell = fit_regularized(y_train_outer.isel(cell_roi_id=[ci]), X_train_outer_model, lambdas[ci].values)
-        if W_model is None:
-            W_model = W_cell
-        else:
-            W_model = xr.concat([W_model, W_cell], dim="cell_roi_id")
+    U, S, Vt = np.linalg.svd(X_train_outer_model.values, full_matrices=False)  # U:(T,r) S:(r,) Vt:(r,K)
+    V        = Vt.T                                                              # (K, r)
+    T_       = U.T @ y_train_outer.values                                        # (r, N)
+    lam_vals = lambdas.values                                                    # (N,) per-cell
+    # Ridge scaling matrix: Dmat[i,j] = S[i] / (S[i]^2 + lam_vals[j])
+    Dmat  = S[:, None] / (S[:, None]**2 + lam_vals[None, :])                    # (r, N)
+    W_arr = V @ (Dmat * T_)                                                      # (K, N) all cells at once
+    W_model = xr.DataArray(
+        W_arr, dims=('weights', 'cell_roi_id'),
+        coords={'weights': X_train_outer_model.weights.values,
+                'cell_roi_id': y_train_outer.cell_roi_id.values}
+    )
             
     # Calculate performance on train and test sets
     var_explained_train = compute_variance_explained(y_train_outer, W_model, X_train_outer_model)
