@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"attached_datasets": [
+		{
+			"id": "a5827c34-40c5-42e9-b313-177375808914",
+			"mount": "stimuli"
+		}
+	]
+}

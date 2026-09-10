@@ -1,0 +1,106 @@
+{
+	"version": 1,
+	"named_parameters": true,
+	"parameters": [
+		{
+			"id": "kJ2mXqR7sLpWdYcA",
+			"name": "kernels_config",
+			"param_name": "kernels_config",
+			"description": "Kernel configuration file",
+			"help_text": "Kernel JSON filename in /capsule/code/kernel_json_files/. E.g. kernel_v01.json",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "kernel_v01.json"
+		},
+		{
+			"id": "v9bO9hsu3NAspf8y",
+			"name": "data_type",
+			"param_name": "data_type",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "events",
+			"required": true
+		},
+		{
+			"id": "LbtIk9Pia4zRiREQ",
+			"name": "cv_nested_folds",
+			"param_name": "cv_nested_folds",
+			"help_text": "Number of nested folds cross-validation for hyperparameter (lambda) search",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "5",
+			"minimum": 1
+		},
+		{
+			"id": "evRdFYV5r8UtRRMy",
+			"name": "n_lambdas",
+			"param_name": "n_lambdas",
+			"help_text": "Number of lambdas to sweep (log-scale interval)",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "40",
+			"minimum": 1
+		},
+		{
+			"id": "dvF9JnPeIXYuLmDC",
+			"name": "cv_folds",
+			"param_name": "cv_folds",
+			"help_text": "Number of cross-validation folds",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "5",
+			"minimum": 1
+		},
+		{
+			"id": "anA6Fn1ZB8y7Jei3",
+			"name": "lambda_min",
+			"param_name": "lambda_min",
+			"help_text": "Minimum lambda value",
+			"type": "text",
+			"value_type": "number",
+			"default_value": "1.0"
+		},
+		{
+			"id": "Xy5LixGskFZnCgHR",
+			"name": "lambda_max",
+			"param_name": "lambda_max",
+			"help_text": "Maximum lambda value",
+			"type": "text",
+			"value_type": "number",
+			"default_value": "10000"
+		},
+		{
+			"id": "oIek7gqJLvJJc8gC",
+			"name": "min_activity_support",
+			"param_name": "min_activity_support",
+			"help_text": "Proportion frames with support to trying fit. If less than this, then the cell is skipped for fitting",
+			"type": "text",
+			"value_type": "number",
+			"default_value": "0.05",
+			"minimum": 0,
+			"maximum": 1
+		},
+		{
+			"id": "nvtv1hP9N5OCM6ix",
+			"name": "test",
+			"param_name": "test",
+			"description": "to run test",
+			"help_text": "Test mode (1): load one plane only, cap at 30 cells",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "0",
+			"minimum": 0,
+			"maximum": 1
+		},
+		{
+			"id": "rNgS3eEdK1mZqPwX",
+			"name": "random_seed",
+			"param_name": "random_seed",
+			"help_text": "Random seed for CV fold assignment (ensures reproducible fold splits)",
+			"type": "text",
+			"value_type": "integer",
+			"default_value": "42",
+			"minimum": 0
+		}
+	]
+}
