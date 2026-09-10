@@ -784,7 +784,10 @@ def collect_model_results(run_params, fit_params, X_train_outer, X_test_outer, y
     test_lams = np.geomspace(fit_params['L2_grid_range'][0], fit_params['L2_grid_range'][1], fit_params['L2_grid_num'])
     test_lams = xr.DataArray(test_lams, dims={'lam'})
     kernels = run_params['dropouts'][model_label]['kernels']
-    weights = [w for w in X_train_outer.weights.values if np.any([(k in w) for k in kernels])]
+    weights = [
+        w for w in X_train_outer.weights.values
+        if any(w.startswith(f'{k}_') for k in kernels)
+    ]
     X_train_outer_model = X_train_outer.sel(weights=weights)
     x_test_outer_model = X_test_outer.sel(weights=weights)
     var_explained_xr_collected = collect_var_explained_across_lambdas_and_nested_folds(X_train_outer_model,
