@@ -19,8 +19,8 @@ Results are written to /results/{session_key}_glm_v{kernel_version}/:
   glm_results_v{version:02}_{session_key}_{data_type}.npy
   qc_summary_{session_key}_{data_type}.png
   heatmap_{session_key}_{data_type}.png
-  processing.json
-  data_description.json
+
+Metadata json files are written to the results directory.
 """
 
 # Thread limits must be set BEFORE numpy is imported so child processes inherit them.
