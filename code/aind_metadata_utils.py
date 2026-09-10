@@ -124,13 +124,15 @@ def write_metadata_files(
     ----------
     session_name    Raw session folder name (e.g. 'multiplane-ophys_800792_…')
     proc_dir        Path to the processed session directory (source of data_description.json)
-    save_dir        Directory where GLM outputs are written (processing.json goes here)
+    save_dir        Directory where GLM outputs are written
+    results_dir     Directory where processing.json and data_description.json are written
     start_dt / end_dt  Wall-clock times bracketing the GLM fit
     run_parameters  Dict of all CLI + kernel parameters to log
     process_name    String appended to the derived data description (default 'glm')
     """
-    save_dir = Path(save_dir)
-    proc_dir = Path(proc_dir)
+    save_dir    = Path(save_dir)
+    proc_dir    = Path(proc_dir)
+    results_dir = Path(results_dir)
 
     # ── data_description.json ─────────────────────────────────────────────────
     source_asset_name = proc_dir.name          # e.g. 'multiplane-ophys_800792_…_processed_…'
