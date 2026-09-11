@@ -352,9 +352,13 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
     # Make new timestamps by starting with each stimulus start time, and adding time points until we hit the next stimulus
     start_times = filtered_stimulus_presentations.start_time.values
     start_times = np.concatenate([start_times, [start_times[-1] + stimulus_interval]]) 
-    mean_step = np.mean(np.diff(activity_trace['timestamps']))  #TODO: consider using ophys frame rate
-    mean_step = float(round(mean_step, 4))
-    # mean_step = 1 / bod.ophys_plane_dataset.metadata['ophys_frame_rate']
+    target_rate = run_params.get('target_frame_rate')
+    if target_rate:
+        mean_step = float(round(1.0 / target_rate, 4))
+        print(f'Coercing to target frame rate: {target_rate} Hz (step={mean_step:.4f} s)')
+    else:
+        mean_step = float(round(np.mean(np.diff(activity_trace['timestamps'])), 4))
+        print(f'Using native frame rate: step={mean_step:.4f} s ({1.0/mean_step:.2f} Hz)')
     sets_of_stimulus_timestamps = []
     for index, start in enumerate(start_times[0:-1]):
         sets_of_stimulus_timestamps.append(np.arange(start_times[index], start_times[index + 1] - mean_step / 2, mean_step)) 
@@ -405,7 +409,9 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
         activity_trace['activity_trace_arr'] = new_trace_arr
         activity_trace['timestamps'] = new_timestamps
         activity_trace['time_bins'] = new_bins
-    
+        if target_rate:
+            activity_trace['ophys_frame_rate'] = float(target_rate)
+
         # Use the number of timesteps per stimulus to define the image kernel length so we get no overlap 
         # kernels_to_limit_per_image_cycle = ['image0','image1','image2','image3','image4','image5','image6','image7']
         kernels_to_limit_per_image_cycle = [k for k in run_params['kernels'].keys() if 'image' in k]

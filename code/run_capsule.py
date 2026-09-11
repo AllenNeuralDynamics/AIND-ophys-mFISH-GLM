@@ -167,6 +167,8 @@ def run():
     parser.add_argument('--lambda_min',           type=float, default=1.0)
     parser.add_argument('--lambda_max',           type=float, default=10000.0)
     parser.add_argument('--min_activity_support', type=float, default=0.05)
+    parser.add_argument('--target_frame_rate', type=float, default=20.0,
+                        help='Resample all planes to this Hz before building the design matrix (default: 20)')
 
     parser.add_argument('--test', type=int, default=0, choices=[0, 1],
                         help='Test mode (1): load one plane only, cap at 30 cells')
@@ -238,7 +240,8 @@ def run():
             print(f'TEST MODE: using 1 plane ({bod_list[0].metadata["ophys_plane_id"]})')
         print('Building design matrix...')
         run_params, design, X, activity_trace = dmtools.build_design_matrix(
-            bod_list, kernel_dict, args.data_type)
+            bod_list, kernel_dict, args.data_type,
+            target_frame_rate=args.target_frame_rate)
         print(f'Design matrix: {X.shape}  |  cells: {activity_trace["activity_trace_arr"].shape[1]}')
 
         rp_serial = {k: (list(v) if isinstance(v, set) else v) for k, v in run_params.items()}

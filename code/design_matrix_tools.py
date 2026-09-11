@@ -417,7 +417,7 @@ def get_pupil_area(bod, ophys_timestamps):
 
 # ── design matrix builder ─────────────────────────────────────────────────────
 
-def build_design_matrix(bod_list, kernel_dict, data_type):
+def build_design_matrix(bod_list, kernel_dict, data_type, target_frame_rate=20):
     """Build the design matrix and activity trace arrays across all planes.
 
     Parameters
@@ -444,7 +444,7 @@ def build_design_matrix(bod_list, kernel_dict, data_type):
     import load_data as ld
     from DesignMatrix import DesignMatrix
 
-    run_params = {'data_type': data_type}
+    run_params = {'data_type': data_type, 'target_frame_rate': target_frame_rate}
     at_list, rp_list = [], []
     for bod in bod_list:
         run_params = ktools.process_kernels(kernel_dict.copy(), run_params, bod)
