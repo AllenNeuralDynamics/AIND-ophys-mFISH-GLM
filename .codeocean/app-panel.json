@@ -81,6 +81,16 @@
 			"maximum": 1
 		},
 		{
+			"id": "tFr8mKqZ2wXcYpBn",
+			"name": "target_frame_rate",
+			"param_name": "target_frame_rate",
+			"help_text": "Resample all planes to this rate (Hz) before building the design matrix. Set to 0 to use the native frame rate.",
+			"type": "text",
+			"value_type": "number",
+			"default_value": "20.0",
+			"minimum": 0
+		},
+		{
 			"id": "nvtv1hP9N5OCM6ix",
 			"name": "test",
 			"param_name": "test",
