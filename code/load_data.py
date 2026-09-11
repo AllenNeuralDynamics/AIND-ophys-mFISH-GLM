@@ -171,7 +171,7 @@ def extract_and_annotate_ophys_plane(bod, run_params, TESTING=False):
     # TODO: better to use previous frame end time and current frame end time. But for now just leave it as-is, 
     # because it's very minor and used for lick counts only.
     ophys_frame_rate = bod.ophys_plane_dataset.metadata['ophys_frame_rate']
-    activity_trace['ophys_frame_rate'] = float(round(ophys_frame_rate, 3))
+    activity_trace['frame_rate'] = float(round(ophys_frame_rate, 3))
     
     # Interpolate onto stimulus 
     activity_trace, run_params = interpolate_to_stimulus(activity_trace, bod, run_params)
@@ -357,6 +357,8 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
         mean_step = float(round(1.0 / target_rate, 4))
         print(f'Coercing to target frame rate: {target_rate} Hz (step={mean_step:.4f} s)')
     else:
+        if target_rate == 0:
+            print('target_frame_rate=0: coercion disabled, using native frame rate')
         mean_step = float(round(np.mean(np.diff(activity_trace['timestamps'])), 4))
         print(f'Using native frame rate: step={mean_step:.4f} s ({1.0/mean_step:.2f} Hz)')
     sets_of_stimulus_timestamps = []
@@ -372,6 +374,8 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
 
     # Check if it was already interpolated
     if np.array_equal(new_timestamps, activity_trace['timestamps']):
+        if target_rate:
+            activity_trace['frame_rate'] = float(target_rate)
         print('Already interpolated onto stimulus aligned timestamps')
         return activity_trace, run_params
     else:
@@ -410,7 +414,7 @@ def interpolate_to_stimulus(activity_trace, bod, run_params, stimulus_interval=0
         activity_trace['timestamps'] = new_timestamps
         activity_trace['time_bins'] = new_bins
         if target_rate:
-            activity_trace['ophys_frame_rate'] = float(target_rate)
+            activity_trace['frame_rate'] = float(target_rate)
 
         # Use the number of timesteps per stimulus to define the image kernel length so we get no overlap 
         # kernels_to_limit_per_image_cycle = ['image0','image1','image2','image3','image4','image5','image6','image7']

@@ -38,7 +38,7 @@ def load_data(session_key, data_type, version, load_path):
 
     activity_trace_info_fn = data_path / f'{data_type}_activity_trace_info.npy'
     activity_trace_info = np.load(activity_trace_info_fn, allow_pickle=True).item()
-    # ophys_frame_rate = activity_trace_info['ophys_frame_rate']
+    # frame_rate = activity_trace_info['frame_rate']
     
     # Trim frames based on kernel offsets
     offsets = [int(w.split('_')[-1]) for w in X.weights.values]
@@ -151,10 +151,10 @@ def get_feature_traces_from_X(X, use_indices, keyword):
     return feature_traces
 
 
-def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_rate):
+def set_stratified_list(fit_params, X, unstd_features, use_indices, frame_rate):
     ''' Set the stratification.
     #IMPORTANT: Returned list contains indices within use_indices.
-    
+
     Parameters
     ----------
     fit_params : dict
@@ -165,8 +165,8 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
         Unstandardized features. To apply binarized stratification.
     use_indices : list
         Indices to use in the design matrix. Defined by the kernel offsets
-    ophys_frame_rate : float
-        Frame rate of the ophys data
+    frame_rate : float
+        Effective frame rate (after any resampling)
         
     Returns
     -------
@@ -194,7 +194,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             # smooth running_speed
             running_speed = xr.DataArray(running_speed, dims='timestamps')
             running_speed['timestamps'] = X_trim['timestamps']
-            smoothing_window = np.round(ophys_frame_rate * fit_params['cv_stratify']['running_smoothing_s']).astype(int)
+            smoothing_window = np.round(frame_rate * fit_params['cv_stratify']['running_smoothing_s']).astype(int)
             sm_running_speed = _ffill_bfill(running_speed.rolling(timestamps=smoothing_window, center=True).mean())
 
             # binarization
@@ -209,7 +209,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             correct = get_feature_traces_from_X(X, use_indices, keyword)
             if correct is None:
                 continue
-            num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
+            num_frames_one_min = np.round(frame_rate * 60).astype(int)
             rolling_performance = _ffill_bfill(correct.rolling(timestamps=num_frames_one_min, center=True).sum())
             performing_frames = np.where(rolling_performance > fit_params['cv_stratify']['rolling_performance_threshold'])[0]
             nonperforming_frames = np.setdiff1d(np.arange(X_trim.shape[0]), performing_frames)
@@ -224,7 +224,7 @@ def set_stratified_list(fit_params, X, unstd_features, use_indices, ophys_frame_
             assert len(licks_trace) == X_trim.shape[0]
             licks = xr.DataArray(licks_trace, dims='timestamps')
             licks['timestamps'] = X_trim['timestamps']
-            num_frames_one_min = np.round(ophys_frame_rate * 60).astype(int)
+            num_frames_one_min = np.round(frame_rate * 60).astype(int)
             lick_freq = _ffill_bfill(licks.rolling(timestamps=num_frames_one_min, center=True).sum())
             licking_frames = np.where(lick_freq > fit_params['cv_stratify']['lick_threshold'])[0]
             nonlicking_frames = np.setdiff1d(np.arange(X_trim.shape[0]), licking_frames)

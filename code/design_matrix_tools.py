@@ -438,7 +438,7 @@ def build_design_matrix(bod_list, kernel_dict, data_type, target_frame_rate=20):
     X : xr.DataArray
         The (T × K) design matrix.
     activity_trace : dict
-        Keys: activity_trace_arr, timestamps, time_bins, ophys_frame_rate.
+        Keys: activity_trace_arr, timestamps, time_bins, frame_rate.
     """
     import kernel_tools as ktools
     import load_data as ld
@@ -459,9 +459,9 @@ def build_design_matrix(bod_list, kernel_dict, data_type, target_frame_rate=20):
         'activity_trace_arr': at_arr,
         'timestamps':         at_list[0]['timestamps'],
         'time_bins':          at_list[0]['time_bins'],
-        'ophys_frame_rate':   at_list[0]['ophys_frame_rate'],
+        'frame_rate':   at_list[0]['frame_rate'],
     }
-    design = DesignMatrix(activity_trace['timestamps'], activity_trace['ophys_frame_rate'])
+    design = DesignMatrix(activity_trace['timestamps'], activity_trace['frame_rate'])
     add_kernels(design, run_params, bod_list[-1], activity_trace)
     X = design.get_X()
     return run_params, design, X, activity_trace

@@ -64,7 +64,7 @@ class GLMCellAnalysis:
         self.timestamps = np.asarray(at_da.timestamps)
 
         at_info = np.load(rp / f'{dt}_activity_trace_info.npy', allow_pickle=True).item()
-        self.fs = at_info['ophys_frame_rate']
+        self.fs = at_info.get('frame_rate') or at_info['ophys_frame_rate']
 
         dropout_labels   = list(self.run_params['dropouts'].keys())
         self._full_idx   = dropout_labels.index('Full')

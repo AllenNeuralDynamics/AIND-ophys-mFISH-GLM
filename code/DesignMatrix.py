@@ -3,13 +3,13 @@ import xarray as xr
 
 
 class DesignMatrix(object):
-    def __init__(self, timestamps, ophys_frame_rate):
+    def __init__(self, timestamps, frame_rate):
         '''
-        A toeplitz-matrix builder for running regression with multiple temporal kernels. 
+        A toeplitz-matrix builder for running regression with multiple temporal kernels.
 
         Args
-            timestamps: The actual timestamps for each time bin that will be used in the regression model. 
-            ophys_frame_rate: the number of ophys timestamps per second
+            timestamps: The actual timestamps for each time bin that will be used in the regression model.
+            frame_rate: the number of timestamps per second (effective rate after any resampling)
         '''
 
         # Add some kernels
@@ -17,7 +17,7 @@ class DesignMatrix(object):
         self.kernel_dict = {}
         self.running_stop = 0
         self.features = {'timestamps': timestamps}
-        self.ophys_frame_rate = ophys_frame_rate
+        self.frame_rate = frame_rate
         self.unstd_features = {}
 
 
@@ -107,13 +107,13 @@ class DesignMatrix(object):
             if kernel_length == 0:
                 kernel_length_samples = 1
             else:
-                kernel_length_samples = int(np.ceil(self.ophys_frame_rate * kernel_length)) 
+                kernel_length_samples = int(np.ceil(self.frame_rate * kernel_length)) 
         else:
             # Some kernels are hard-coded by number of weights
             kernel_length_samples = num_weights
 
         # CONVERT offset to offset_samples
-        offset_samples = int(np.floor(self.ophys_frame_rate*offset))
+        offset_samples = int(np.floor(self.frame_rate*offset))
 
         this_kernel = []
         for i in range(kernel_length_samples):

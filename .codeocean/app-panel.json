@@ -22,6 +22,16 @@
 			"required": true
 		},
 		{
+			"id": "tFr8mKqZ2wXcYpBn",
+			"name": "target_frame_rate",
+			"param_name": "target_frame_rate",
+			"help_text": "Resample all planes to this rate (Hz) before building the design matrix. Set to 0 to use the native frame rate.",
+			"type": "text",
+			"value_type": "number",
+			"default_value": "20.0",
+			"minimum": 0
+		},
+		{
 			"id": "LbtIk9Pia4zRiREQ",
 			"name": "cv_nested_folds",
 			"param_name": "cv_nested_folds",
@@ -79,16 +89,6 @@
 			"default_value": "0.05",
 			"minimum": 0,
 			"maximum": 1
-		},
-		{
-			"id": "tFr8mKqZ2wXcYpBn",
-			"name": "target_frame_rate",
-			"param_name": "target_frame_rate",
-			"help_text": "Resample all planes to this rate (Hz) before building the design matrix. Set to 0 to use the native frame rate.",
-			"type": "text",
-			"value_type": "number",
-			"default_value": "20.0",
-			"minimum": 0
 		},
 		{
 			"id": "nvtv1hP9N5OCM6ix",

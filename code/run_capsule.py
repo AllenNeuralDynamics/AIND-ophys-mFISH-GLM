@@ -250,9 +250,9 @@ def run():
         X.to_netcdf(dm_file)
         activity_trace['activity_trace_arr'].to_netcdf(at_file)
         np.save(save_dir / f'{args.data_type}_activity_trace_info.npy', {
-            'timestamps':       activity_trace['timestamps'],
-            'time_bins':        activity_trace['time_bins'],
-            'ophys_frame_rate': activity_trace['ophys_frame_rate'],
+            'timestamps': activity_trace['timestamps'],
+            'time_bins':  activity_trace['time_bins'],
+            'frame_rate': activity_trace['frame_rate'],
         })
         np.save(save_dir / 'unstd_features.npy', design.unstd_features)
         print('Design matrix artifacts saved.')
@@ -268,7 +268,7 @@ def run():
     X_load, at_arr, at_info, run_params_load, unstd_features, use_indices = \
         gft.load_data(session_key, args.data_type, version, load_path=results_dir)
 
-    ophys_frame_rate = at_info['ophys_frame_rate']
+    frame_rate       = at_info.get('frame_rate') or at_info['ophys_frame_rate']
     X_trim           = X_load[use_indices, :]
     at_trim          = at_arr[use_indices, :]
     at_trim_filtered = gft.filter_activity_trace_matrix(
@@ -280,7 +280,7 @@ def run():
         print(f'TEST MODE: capped to {n_test} cells')
 
     stratified_list = gft.set_stratified_list(
-        fit_params, X_load, unstd_features, use_indices, ophys_frame_rate)
+        fit_params, X_load, unstd_features, use_indices, frame_rate)
     stratified_frames, cv_inds_stratified = gft.get_stratified_folds(fit_params, stratified_list)
 
     print(f'Fitting GLM ({fit_params["cv_fold"]}-fold CV)...')
