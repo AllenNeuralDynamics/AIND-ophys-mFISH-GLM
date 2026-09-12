@@ -936,6 +936,9 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, activity_trace_trim, 
             
             # session_model_from_splits.sel(timestamps=test_timestamps, model=model)[:] = X_model.values @ W_fold_model.values
             # Somehow the above line does not work
+            # NOTE: X_model and W_fold_model are both .sel(weights=weights) from the same list
+            # on lines above — this is what makes the positional numpy @ safe despite W having
+            # lexicographic weight ordering and X having numeric ordering.
             session_model_from_splits[test_frames, :, mi] = X_model.values @ W_fold_model.values
 
     # getting session model from mean coefficients across splits
@@ -946,6 +949,7 @@ def get_sessionwise_model_traces(fit_params, W_cv, X_trim, activity_trace_trim, 
         weights = W_model.dropna(dim='weights').weights.values
         X_model = X_trim.sel(weights=weights)
         W_model = W_model.sel(weights=weights)
+        # Safe: both X_model and W_model are .sel(weights=weights) from the same list above.
         session_model_from_mean_W.sel(model=model)[:] = X_model.values @ W_model.values
         
     return session_model_from_splits, session_model_from_mean_W
