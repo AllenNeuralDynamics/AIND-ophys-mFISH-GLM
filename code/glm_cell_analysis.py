@@ -15,6 +15,7 @@ glm.save_top_cells(n=10)
 """
 
 import json
+import sys
 import warnings
 from pathlib import Path
 
@@ -28,6 +29,11 @@ from matplotlib.transforms import blended_transform_factory
 import xarray as xr
 
 warnings.filterwarnings('ignore')
+
+# Make glm_fit_tools importable from the same directory
+_CODE_DIR = Path(__file__).parent
+if str(_CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(_CODE_DIR))
 
 
 class GLMCellAnalysis:
@@ -55,7 +61,8 @@ class GLMCellAnalysis:
             self.run_params = json.load(f)
 
         X_da = xr.open_dataarray(rp / 'design_matrix.nc', mmap=False)
-        self.X_mat        = np.asarray(X_da)
+        self.X_da          = X_da                          # kept for compute_kernel_adj_ve
+        self.X_mat         = np.asarray(X_da)
         self.weight_labels = list(X_da.weights.values)
 
         at_da = xr.open_dataarray(rp / f'{dt}_activity_trace_matrix.nc', mmap=False)
@@ -71,16 +78,20 @@ class GLMCellAnalysis:
         self._dropout_labels = dropout_labels
 
         W_full_da = self.results['W_cv'].mean(dim='test_fold_ind').sel(model='Full')
-        self.W_mean  = W_full_da.values.T
-        self.w_labels = list(W_full_da.weights.values)
+        # Reorder W to match X_da's numeric weight ordering, so W_mean and X_mat
+        # share a consistent positional layout and cannot be silently cross-multiplied wrong.
+        W_full_da = W_full_da.sel(weights=X_da.weights.values)
+        self.W_mean  = W_full_da.values.T   # (cells, weights) — numeric weight order
+        self.w_labels = list(W_full_da.weights.values)  # numeric order, same as weight_labels
 
         Y_pred_da    = X_da @ W_full_da
         self.Y_pred  = np.asarray(Y_pred_da)
 
         # W_full_da only covers fitted cells; subset Y_raw to match
-        fitted_ids   = list(W_full_da.cell_roi_id.values)
-        at_fitted    = at_da.sel(cell_roi_id=fitted_ids)
-        self.Y_raw   = np.asarray(at_fitted)
+        fitted_ids    = list(W_full_da.cell_roi_id.values)
+        at_fitted     = at_da.sel(cell_roi_id=fitted_ids)
+        self.at_da    = at_fitted                           # xarray, kept for compute_kernel_adj_ve
+        self.Y_raw    = np.asarray(at_fitted)
         self.cell_ids = fitted_ids
         self.Y_resid  = self.Y_raw - self.Y_pred
 
@@ -101,10 +112,15 @@ class GLMCellAnalysis:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _kernel_weights(self, cell_idx, kernel_prefix):
-        inds = [i for i, w in enumerate(self.w_labels)
-                if w.startswith(kernel_prefix + '_')]
-        if not inds:
+        # Sort numerically by lag index (W labels are stored lexicographically)
+        pairs = sorted(
+            [(i, w) for i, w in enumerate(self.w_labels)
+             if w.startswith(kernel_prefix + '_')],
+            key=lambda x: int(x[1].split('_')[-1])
+        )
+        if not pairs:
             return None, None
+        inds = [i for i, _ in pairs]
         offset = self.kernel_info.get(kernel_prefix, {}).get('offset', 0)
         t = np.arange(len(inds)) / self.fs + offset
         return t, self.W_mean[cell_idx, inds]
@@ -135,6 +151,56 @@ class GLMCellAnalysis:
         return (t,
                 A.mean(axis=0), A.std(axis=0) / np.sqrt(n),
                 P.mean(axis=0), P.std(axis=0) / np.sqrt(n))
+
+    def compute_kernel_adj_ve(self, kernel_name):
+        """Adjusted VE for kernel_name, evaluated only at support frames.
+
+        adjVE[cell] = VE(Full, support) - VE(dropout, support)
+
+        where support = all frames within the kernel window [0, n_lags) after
+        each event, and VE is computed via compute_adjusted_variance_explained
+        from glm_fit_tools (centers on global mean, evaluates residuals at
+        support frames only).
+
+        Parameters
+        ----------
+        kernel_name : str
+            Kernel prefix, e.g. 'omissions', 'hits', 'running'.
+            Must match both a key in run_params['dropouts'] and a set of
+            weight labels '<kernel_name>_<lag>' in the design matrix.
+
+        Returns
+        -------
+        adj_ve : np.ndarray, shape (n_cells,)
+            Per-cell adjVE. Positive = Full model better than dropout at
+            support frames.
+        """
+        from glm_fit_tools import compute_adjusted_variance_explained
+
+        # Support mask: frames within the kernel window after each event
+        ev = self._event_frames(kernel_name)
+        n_lags = sum(1 for w in self.weight_labels
+                     if w.startswith(kernel_name + '_'))
+        T = self.X_da.sizes['timestamps']
+        mask = np.zeros(T, dtype=bool)
+        for f in ev:
+            mask[f : min(f + n_lags, T)] = True
+
+        W_mean = self.results['W_cv'].mean(dim='test_fold_ind')
+
+        def _ve(model_name):
+            W_m = W_mean.sel(model=model_name)
+            kept = W_m.dropna(dim='weights').weights.values
+            return compute_adjusted_variance_explained(
+                self.at_da,
+                W_m.sel(weights=kept),
+                self.X_da.sel(weights=kept),
+                mask,
+            )
+
+        ve_full = _ve('Full')
+        ve_drop = _ve(kernel_name)     # dropout model: Full minus this kernel
+        return (ve_full - ve_drop).values
 
     def cell_label(self, cell_idx):
         return f'{self.cell_ids[cell_idx]}  VE={self.ve_test[cell_idx]:.3f}'
