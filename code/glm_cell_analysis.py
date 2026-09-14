@@ -100,6 +100,9 @@ class GLMCellAnalysis:
 
         self.kernel_info = self.run_params.get('input_kernel_dict', {})
 
+        # Frames that were actually used for fitting (excludes roll-wrap boundaries).
+        self.use_indices = np.asarray(self.results['use_indices'])
+
         self._image_names = sorted(set(
             lbl.rsplit('_', 1)[0] for lbl in self.weight_labels
             if lbl.startswith('im')
@@ -130,14 +133,30 @@ class GLMCellAnalysis:
         ktype = self.kernel_info.get(feature_prefix, {}).get('type', 'discrete')
         if ktype == 'continuous':
             return np.array([], dtype=int)
-        # For discrete kernels, the zero-lag column (t=0 at the event) is
-        # '{prefix}_0' regardless of the kernel's time offset, because the
-        # design matrix uses lag indices in frames relative to t=0.
-        zero_lag = f'{feature_prefix}_0'
-        if zero_lag not in self.weight_labels:
+
+        # Collect (lag_index, column_index) pairs for all weight labels that
+        # belong to this kernel (format: "{prefix}_{integer_lag}").
+        lag_cols = []
+        pfx = feature_prefix + '_'
+        for ci, w in enumerate(self.weight_labels):
+            if w.startswith(pfx):
+                try:
+                    lag = int(w[len(pfx):])
+                    lag_cols.append((lag, ci))
+                except ValueError:
+                    pass
+        if not lag_cols:
             return np.array([], dtype=int)
-        col = self.weight_labels.index(zero_lag)
-        return np.where(self.X_mat[:, col] > 0.5)[0]
+
+        # Prefer the zero-lag column (event frame aligns exactly); fall back to
+        # the smallest available lag and shift detected indices back by that lag.
+        # This handles kernels whose offset puts all lags > 0 (no _0 column).
+        lag_cols.sort(key=lambda x: x[0])
+        zero = [(l, c) for l, c in lag_cols if l == 0]
+        first_lag, first_col = zero[0] if zero else lag_cols[0]
+
+        frames = np.where(self.X_mat[:, first_col] > 0.5)[0]
+        return frames - first_lag
 
     def _psth(self, cell_idx, event_frames, pre_s=0.5, post_s=1.5):
         pre  = int(np.round(pre_s  * self.fs))
@@ -201,6 +220,14 @@ class GLMCellAnalysis:
             mask = np.any(self.X_mat[:, kernel_cols] != 0, axis=1)
         else:
             mask = np.ones(T, dtype=bool)
+
+        # DesignMatrix builds lagged columns with np.roll, which wraps values
+        # circularly at the session boundaries. Those boundary frames are
+        # excluded from fitting via use_indices. Intersect to avoid including
+        # spurious support from the circular wrap.
+        valid = np.zeros(T, dtype=bool)
+        valid[self.use_indices] = True
+        mask = mask & valid
 
         W_mean = self.results['W_cv'].mean(dim='test_fold_ind')
 
