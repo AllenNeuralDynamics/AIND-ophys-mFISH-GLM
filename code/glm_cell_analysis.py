@@ -126,6 +126,13 @@ class GLMCellAnalysis:
         return t, self.W_mean[cell_idx, inds]
 
     def _event_frames(self, feature_prefix):
+        # Continuous regressors have no discrete events to align to.
+        ktype = self.kernel_info.get(feature_prefix, {}).get('type', 'discrete')
+        if ktype == 'continuous':
+            return np.array([], dtype=int)
+        # For discrete kernels, the zero-lag column (t=0 at the event) is
+        # '{prefix}_0' regardless of the kernel's time offset, because the
+        # design matrix uses lag indices in frames relative to t=0.
         zero_lag = f'{feature_prefix}_0'
         if zero_lag not in self.weight_labels:
             return np.array([], dtype=int)
@@ -157,10 +164,10 @@ class GLMCellAnalysis:
 
         adjVE[cell] = VE(Full, support) - VE(dropout, support)
 
-        where support = all frames within the kernel window [0, n_lags) after
-        each event, and VE is computed via compute_adjusted_variance_explained
-        from glm_fit_tools (centers on global mean, evaluates residuals at
-        support frames only).
+        where support = all frames where the kernel's design-matrix columns are
+        nonzero (correct for any offset and for continuous regressors), and VE
+        is computed via compute_adjusted_variance_explained from glm_fit_tools
+        (centers on global mean, evaluates residuals at support frames only).
 
         Parameters
         ----------
@@ -177,14 +184,23 @@ class GLMCellAnalysis:
         """
         from glm_fit_tools import compute_adjusted_variance_explained
 
-        # Support mask: frames within the kernel window after each event
-        ev = self._event_frames(kernel_name)
-        n_lags = sum(1 for w in self.weight_labels
-                     if w.startswith(kernel_name + '_'))
+        # Support mask built directly from design matrix columns so that it is
+        # correct for all kernel types:
+        #   - discrete, offset=0 (omissions, hits, misses): nonzero only inside
+        #     the kernel window [0, n_lags) after each event.
+        #   - discrete, offset≠0 (licks, offset=-1 s): nonzero inside the
+        #     shifted window [offset, offset+length]; the DM encoding already
+        #     accounts for the offset so we never mis-align the mask.
+        #   - continuous (running, pupil): z-scored before entering the DM, so
+        #     the regressor is zero only when the raw signal == its mean; in
+        #     practice the mask is True at effectively all frames.
         T = self.X_da.sizes['timestamps']
-        mask = np.zeros(T, dtype=bool)
-        for f in ev:
-            mask[f : min(f + n_lags, T)] = True
+        kernel_cols = [i for i, w in enumerate(self.weight_labels)
+                       if w.startswith(kernel_name + '_')]
+        if kernel_cols:
+            mask = np.any(self.X_mat[:, kernel_cols] != 0, axis=1)
+        else:
+            mask = np.ones(T, dtype=bool)
 
         W_mean = self.results['W_cv'].mean(dim='test_fold_ind')
 
