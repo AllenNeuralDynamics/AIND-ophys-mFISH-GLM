@@ -108,6 +108,14 @@ Set `--test 1` to run a fast smoke-test:
 
 ## Known limitations
 
+**Supports flashed-image sessions only.** Stimulus handling assumes a flashed natural-image
+paradigm: `each-image` / `any-image` kernels are built from `stimulus_presentations.image_name`
+(excluding `omitted`), and timestamps and per-image-cycle kernel trimming assume the 750 ms image
+cycle (`kernel_tools.py`, `load_data.py`). Not yet supported, and needs new stimulus regressors,
+timebase alignment and kernel configs:
+- gratings, both static and flashed
+- passive sessions (gratings and movie)
+
 **Possible data leakage from frame-level fold assignment.** Within each stratum, frames are
 shuffled individually before being split into folds (`get_stratified_folds`). Folds are *not*
 chunked by trial, image flash, or time window, so a held-out frame usually has temporally adjacent
