@@ -83,6 +83,60 @@ Set `--test 1` to run a fast smoke-test:
 - Cells are capped at 30 (or the plane's cell count, whichever is smaller)
 - All other parameters apply normally
 
+## Improvements over the previous GLM (Garrett et al., 2026)
+
+**Model performance**
+- *Stratified cross-validation folds.* Frames are stratified by time (5 contiguous bins) and by
+  binarized behavioral state (running speed, lick rate, rolling reward rate, pupil), then every
+  combination of strata is split evenly across the outer and inner folds. Each fold therefore
+  samples all session epochs and behavioral states, including rewarded and non-rewarded periods.
+  Variables missing from a session, or with an empty stratum, are skipped. Settings are in
+  `default_fit_params()` (`cv_stratify`).
+- *Per-cell ridge regularization via nested cross-validation.* For each outer fold, the inner CV
+  scores a log-spaced λ grid (`--n_lambdas`, `--lambda_min`, `--lambda_max`) and picks the λ with
+  the highest mean inner-fold VE separately for every cell. The outer fit uses that cell's own λ.
+
+**Fitting speed**
+- *SVD-based vectorized ridge.* One economy SVD of the training design matrix per fold replaces
+  per-λ and per-cell linear solves. All λ values and all cells are scored with elementwise scaling
+  `S / (S² + λ)` and a single matrix multiply. The final fit applies each cell's own λ through an
+  `(r × N)` scaling matrix in one matmul.
+- *Flat (fold × dropout-model) parallelism.* One persistent fork-based `multiprocessing` pool runs
+  all tasks (replacing Ray and the per-fold pools). Fold indices and design/activity arrays live in
+  fork-shared memory, and workers slice them per task, so large arrays are neither serialized nor
+  duplicated.
+
+## Known limitations
+
+**Possible data leakage from frame-level fold assignment.** Within each stratum, frames are
+shuffled individually before being split into folds (`get_stratified_folds`). Folds are *not*
+chunked by trial, image flash, or time window, so a held-out frame usually has temporally adjacent
+frames in the training set.
+
+*Why this is a problem.* Adjacent frames (about 10 Hz) have nearly identical design-matrix rows
+(kernels span up to 2.25 s) and highly correlated activity (indicator kinetics, slow drift,
+autocorrelated residuals). Held-out prediction then partly amounts to interpolation between
+neighboring training frames rather than generalization to new events. The train/test VE ratio
+(overfitting check) cannot detect this, because test VE is inflated together with train VE and the
+ratio stays near 1. Consequences:
+- Absolute VE may be optimistic.
+- The inner CV is also frame-shuffled, so it favors weak regularization and the per-cell λ may be
+  biased low.
+
+*Why the effect may be modest.* The model is linear ridge with roughly 200 weights per cell fit to
+thousands of frames, so it cannot memorize individual frames. Leakage mainly helps through slow
+residual structure that the regressors can partly absorb. Dropout and kernel comparisons are
+expected to be less affected, since all models are inflated similarly. This has not been measured.
+
+*How to test.*
+1. On a few sessions, compute lag-1 and lag-5 autocorrelation of test-set residuals. High values
+   indicate leakage potential.
+2. Refit with chunked folds (contiguous blocks, e.g. one image flash of 0.75 s or fixed 1–2 s
+   windows, ideally longer than the longest kernel) and compare against the current frame-shuffled
+   folds: per-cell test VE (scatter), distributions of the selected λ, and dropout VE differences.
+3. If VE and λ change little, the current scheme is adequate; otherwise move to chunked folds and
+   bump the version.
+
 ## Code structure
 
 | Module | Role |
